@@ -44,8 +44,17 @@ function useRimMaterial(color: string, power: number, intensity: number, inner: 
 
 export function Globe() {
   const overview = useMarket((s) => s.overview);
-  const supportedKey = overview?.countries.map((c) => c.code).join(",") ?? "";
-  const base = useMemo(() => buildBaseMap(new Set(supportedKey ? (supportedKey.split(",") as CountryCode[]) : [])), [supportedKey]);
+  /* Asset share per country drives the purple depth (Solana branding). */
+  const intensityKey = overview?.countries.map((c) => `${c.code}:${c.assetCount}`).join(",") ?? "";
+  const base = useMemo(() => {
+    const m = new Map<CountryCode, number>();
+    if (intensityKey) {
+      const entries = intensityKey.split(",").map((e) => { const [code, n] = e.split(":"); return [code as CountryCode, Number(n)] as const; });
+      const max = Math.max(1, ...entries.map((e) => e[1]));
+      for (const [code, n] of entries) m.set(code, Math.log1p(n) / Math.log1p(max));
+    }
+    return buildBaseMap(m);
+  }, [intensityKey]);
   const hl = useMemo(() => buildHighlightMap(), []);
   useEffect(() => () => { base.texture.dispose(); }, [base]);
   useEffect(() => () => { hl.texture.dispose(); }, [hl]);
@@ -56,9 +65,11 @@ export function Globe() {
   const hlRef = useRef({ focused, highlighted, heat, lastDraw: 0, key: "" });
   hlRef.current.focused = focused; hlRef.current.highlighted = highlighted; hlRef.current.heat = heat;
 
-  const rimInner = useRimMaterial(C.cyan, 3.2, 0.85, true, THREE.FrontSide);
-  const halo = useRimMaterial(C.cyanDeep, 3.0, 0.55, false, THREE.BackSide);
-  const halo2 = useRimMaterial(C.cyan, 5.0, 0.25, false, THREE.BackSide);
+  /* Atmosphere: a crisp cyan rim on the planet, then a faint purple haze that
+   * falls off quickly — a hint of Solana, not a band. */
+  const rimInner = useRimMaterial(C.cyan, 3.6, 0.6, true, THREE.FrontSide);
+  const halo = useRimMaterial(C.solDeep, 5.5, 0.22, false, THREE.BackSide);
+  const halo2 = useRimMaterial(C.sol, 7.0, 0.08, false, THREE.BackSide);
 
   const ringsRef = useRef<THREE.Group>(null);
   const { gl } = useThree();
@@ -153,18 +164,18 @@ export function Globe() {
 
       {/* Atmosphere: inner rim + two back-side halos */}
       <mesh scale={1.012} material={rimInner}><sphereGeometry args={[R, 64, 48]} /></mesh>
-      <mesh scale={1.11} material={halo}><sphereGeometry args={[R, 48, 32]} /></mesh>
-      <mesh scale={1.26} material={halo2}><sphereGeometry args={[R, 48, 32]} /></mesh>
+      <mesh scale={1.07} material={halo}><sphereGeometry args={[R, 48, 32]} /></mesh>
+      <mesh scale={1.16} material={halo2}><sphereGeometry args={[R, 48, 32]} /></mesh>
 
       {/* Holographic orbit rings */}
       <group ref={ringsRef}>
         <mesh rotation={[Math.PI / 2 + 0.35, 0.1, 0]}>
           <ringGeometry args={[R * 1.42, R * 1.428, 180]} />
-          <meshBasicMaterial color={C.cyan} transparent opacity={0.22} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial color={C.sol} transparent opacity={0.34} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
         </mesh>
         <mesh rotation={[Math.PI / 2 - 0.55, -0.4, 0]}>
           <ringGeometry args={[R * 1.62, R * 1.624, 180]} />
-          <meshBasicMaterial color={C.violet} transparent opacity={0.14} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial color={C.solGreen} transparent opacity={0.16} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
         </mesh>
       </group>
     </group>

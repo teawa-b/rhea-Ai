@@ -29,7 +29,8 @@ export function HoloLabel({ position, title, subtitle, accent = C.cyan, scale = 
   const bgOpacity = (dim ? 0.55 : 0.82) * opacity;
   const inner = useRef<THREE.Group>(null);
   useFrame(() => {
-    if (inner.current) inner.current.scale.setScalar(scale * Math.pow(rig.dist / DIST.world, 0.6));
+    /* ~constant on-screen size: scale linearly with camera distance. */
+    if (inner.current) inner.current.scale.setScalar(scale * Math.pow(rig.dist / DIST.world, 0.9));
   });
   return (
     <Billboard position={position} follow lockX={false} lockY={false} lockZ={false}>

@@ -19,8 +19,10 @@ const X_AXIS = new THREE.Vector3(1, 0, 0);
 const AUTO_RATE = 0.10;      // rad/s idle drift
 const IDLE_AFTER = 2.2;      // s before drift resumes
 
-export const XR_ANCHOR = new THREE.Vector3(0, 1.15, -1.55);
-export const XR_BASE_SCALE = 0.42;
+/* MR layout: the globe floats left of centre at chest height so the chart
+ * cluster can float to the right, both within comfortable reach/view. */
+export const XR_ANCHOR = new THREE.Vector3(-0.5, 1.3, -1.55);
+export const XR_BASE_SCALE = 0.36;
 
 export function CameraRig({ children }: { children: ReactNode }) {
   const group = useRef<THREE.Group>(null);

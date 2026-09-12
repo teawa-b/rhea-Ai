@@ -264,19 +264,42 @@ for (const co of COMPANIES) if (SEED_MINTS[co.tokenSymbol]) co.seedMint = SEED_M
 export const COMPANY_BY_ID = Object.fromEntries(COMPANIES.map((co) => [co.id, co])) as Record<string, Company>;
 export const COMPANY_BY_TOKEN = Object.fromEntries(COMPANIES.map((co) => [co.tokenSymbol.toUpperCase(), co])) as Record<string, Company>;
 
-/* Loose matching used by the AI tools: "nvidia", "NVDA", "NVDAx", "Nvidia Corp". */
+/* Loose matching used by the AI tools: "nvidia", "NVDA", "NVDAx", "Nvidia Corp".
+ * Exact matches first; fuzzy matches only on whole words so "China" never
+ * resolves to "China Construction Bank". */
 export function resolveCompany(query: string): Company | undefined {
-  const q = query.trim().toLowerCase();
+  const q = query.trim().toLowerCase().replace(/[.,!?]+$/g, "");
   if (!q) return undefined;
-  return (
+  const exact =
     COMPANY_BY_ID[q] ||
     COMPANIES.find((co) => co.ticker.toLowerCase() === q) ||
     COMPANIES.find((co) => co.tokenSymbol.toLowerCase() === q) ||
     COMPANIES.find((co) => co.name.toLowerCase() === q) ||
-    COMPANIES.find((co) => co.name.toLowerCase().startsWith(q)) ||
-    COMPANIES.find((co) => q.includes(co.name.toLowerCase().split(" ")[0]) && co.name.split(" ")[0].length > 2)
+    COMPANIES.find((co) => co.id.replace(/-/g, " ") === q);
+  if (exact) return exact;
+  const alias = COMPANY_ALIASES[q];
+  if (alias) return COMPANY_BY_ID[alias];
+  /* Never treat a country name as a company. */
+  if (COUNTRY_WORDS.has(q)) return undefined;
+  const words = q.split(/\s+/).filter((w) => w.length > 1);
+  const firstWord = (co: Company) => co.name.toLowerCase().split(/\s+/)[0];
+  return (
+    COMPANIES.find((co) => co.name.toLowerCase().startsWith(q) && q.length >= 4 && !COUNTRY_WORDS.has(q)) ||
+    COMPANIES.find((co) => words.includes(firstWord(co)) && firstWord(co).length > 3 && !COUNTRY_WORDS.has(firstWord(co))) ||
+    COMPANIES.find((co) => words.includes(co.ticker.toLowerCase()) && co.ticker.length >= 3)
   );
 }
+
+const COMPANY_ALIASES: Record<string, string> = {
+  "taiwan semiconductor": "tsmc", "taiwan semi": "tsmc", google: "alphabet", facebook: "meta", strategy: "microstrategy",
+  "s&p 500": "sp500", "s&p": "sp500", spy: "sp500", "sp500": "sp500", nasdaq: "nasdaq100", "nasdaq 100": "nasdaq100", qqq: "nasdaq100",
+  "berkshire hathaway": "berkshire", "jp morgan": "jpmorgan", "j&j": "jnj", "johnson and johnson": "jnj", coke: "coca-cola", pepsi: "pepsico",
+  "mcdonald's": "mcdonalds", "mcdonalds": "mcdonalds", exxonmobil: "exxon", lilly: "eli-lilly", "eli lilly": "eli-lilly", "gold trust": "gold",
+  "novo": "novo-nordisk", astra: "astrazeneca", "arm holdings": "arm", "hong kong exchanges": "hkex", "hkex": "hkex", "spacex": "spacex",
+  "united health": "unitedhealth", "space x": "spacex", "core weave": "coreweave", "app lovin": "applovin", "micron": "micron",
+};
+
+const COUNTRY_WORDS = new Set(["usa", "united states", "america", "us", "u.s.", "china", "prc", "hong kong", "hk", "taiwan", "uk", "united kingdom", "britain", "england", "japan", "denmark", "netherlands", "holland", "germany", "france", "switzerland", "korea", "south korea", "india", "canada", "australia", "singapore", "ireland"]);
 
 export function resolveCountry(query: string): CountryDef | undefined {
   const q = query.trim().toLowerCase();

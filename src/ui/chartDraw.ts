@@ -18,9 +18,11 @@ export type ChartDrawOpts = {
   height: number;
   dpr: number;
   ticker: string;
+  /** Passthrough mode: no backdrop, heavier strokes, haloed text for legibility */
+  ar?: boolean;
 };
 
-const CY = "#3fe0ff", FR = "#8fe8ff", MG = "#ff2e88", GR = "#4ade80", AM = "#ffb020", MUTED = "#8ea3bd";
+const CY = "#3fe0ff", FR = "#8fe8ff", MG = "#ff2e88", GR = "#14F195", AM = "#ffb020", MUTED = "#8ea3bd";
 
 function fmtPrice(v: number) {
   return v >= 1000 ? v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : v >= 100 ? v.toFixed(1) : v.toFixed(2);
@@ -38,12 +40,16 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
+  const ar = Boolean(o.ar);
+  /* Text halo so labels survive over a live camera feed. */
+  const halo = () => { if (ar) { ctx.shadowColor = "rgba(0,0,0,0.9)"; ctx.shadowBlur = 4; } };
+  const noHalo = () => { ctx.shadowBlur = 0; };
 
-  const padL = 8, padR = 54, padT = 14, padB = 22;
+  const padL = 8, padR = 54, padT = 30, padB = 22;
   const iw = W - padL - padR, ih = H - padT - padB;
 
   /* Subtle grid */
-  ctx.strokeStyle = "rgba(63,224,255,0.09)";
+  ctx.strokeStyle = ar ? "rgba(143,232,255,0.22)" : "rgba(63,224,255,0.09)";
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const y = padT + (ih * i) / 4;
@@ -94,9 +100,10 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
 
     ctx.beginPath();
     view.forEach((c, i) => { const px = x(c.t), py = y(c.c); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
-    ctx.strokeStyle = lineColor; ctx.lineWidth = 1.8; ctx.lineJoin = "round";
-    ctx.shadowColor = lineColor; ctx.shadowBlur = 8;
+    ctx.strokeStyle = lineColor; ctx.lineWidth = ar ? 3.2 : 1.8; ctx.lineJoin = "round";
+    ctx.shadowColor = lineColor; ctx.shadowBlur = ar ? 14 : 8;
     ctx.stroke();
+    if (ar) { ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.shadowBlur = 0; ctx.globalAlpha = 0.55; ctx.stroke(); ctx.globalAlpha = 1; }
     ctx.shadowBlur = 0;
   } else {
     const bw = Math.max(1.5, (iw / view.length) * 0.62);
@@ -110,8 +117,9 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
     }
   }
 
-  /* Event markers */
+  /* Event markers (labels stacked under the header so they never collide) */
   ctx.font = "600 10px Inter, system-ui, sans-serif";
+  let evRow = 0;
   for (const ev of o.events) {
     const ts = ev.timestamp / 1000;
     if (ts < tMin || ts > tMax) continue;
@@ -127,10 +135,11 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
     ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex, y(near.c), 1.8, 0, Math.PI * 2); ctx.fill();
     const label = ev.title.length > 26 ? ev.title.slice(0, 25) + "…" : ev.title;
     const tw = ctx.measureText(label).width + 10;
+    const ly = padT + 4 + (evRow++ % 3) * 15;
     const lx = Math.min(W - padR - tw, Math.max(padL, ex - tw / 2));
-    ctx.fillStyle = "rgba(5,6,13,0.85)"; ctx.fillRect(lx, padT - 12, tw, 14);
-    ctx.strokeStyle = col; ctx.strokeRect(lx + 0.5, padT - 11.5, tw - 1, 13);
-    ctx.fillStyle = col; ctx.textAlign = "left"; ctx.fillText(label, lx + 5, padT - 1.5);
+    ctx.fillStyle = "rgba(5,6,13,0.85)"; ctx.fillRect(lx, ly, tw, 14);
+    ctx.strokeStyle = col; ctx.strokeRect(lx + 0.5, ly + 0.5, tw - 1, 13);
+    ctx.fillStyle = col; ctx.textAlign = "left"; ctx.fillText(label, lx + 5, ly + 10.5);
   }
 
   /* Current price marker */
@@ -148,12 +157,13 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
   }
 
   /* Y labels */
-  ctx.fillStyle = MUTED; ctx.font = "10px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
+  halo();
+  ctx.fillStyle = ar ? "#dfe9f5" : MUTED; ctx.font = "10px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
   ctx.fillText(fmtPrice(hi - padY), W - padR + 6, padT + 10);
   ctx.fillText(fmtPrice(lo + padY), W - padR + 6, padT + ih - 2);
 
   /* X labels */
-  ctx.textAlign = "center"; ctx.fillStyle = MUTED; ctx.font = "10px Inter, system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.fillStyle = ar ? "#dfe9f5" : MUTED; ctx.font = "10px Inter, system-ui, sans-serif";
   const n = 4;
   for (let i = 0; i <= n; i++) {
     const t = tMin + ((tMax - tMin) * i) / n;
@@ -162,14 +172,16 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
     ctx.fillText(label, x(t), H - 7);
   }
 
-  /* Header: ticker · range · session · source */
+  /* Header row: ticker · range · session   |   data source */
   ctx.textAlign = "left"; ctx.font = "700 10px Inter, system-ui, sans-serif";
   ctx.fillStyle = FR;
-  const status = o.marketOpen ? "● MARKET OPEN" : "○ MARKET CLOSED";
-  ctx.fillText(`${o.ticker} · ${o.range}${o.focusTs ? " · FOCUS" : ""}`, padL + 2, padT - 3);
-  ctx.textAlign = "right"; ctx.fillStyle = o.marketOpen ? GR : MUTED;
-  ctx.fillText(status, W - padR - 2, padT - 3);
-  ctx.textAlign = "right"; ctx.fillStyle = "rgba(142,163,189,0.7)"; ctx.font = "9px Inter, system-ui, sans-serif";
-  ctx.fillText(`data: ${o.source}`, W - 4, H - 7);
+  const head = `${o.ticker} · ${o.range}${o.focusTs ? " · FOCUS" : ""}`;
+  ctx.fillText(head, padL + 2, 12);
+  const headW = ctx.measureText(head).width;
+  ctx.fillStyle = o.marketOpen ? GR : MUTED;
+  ctx.fillText(o.marketOpen ? "● MARKET OPEN" : "○ MARKET CLOSED", padL + 2 + headW + 12, 12);
+  ctx.textAlign = "right"; ctx.fillStyle = ar ? "#dfe9f5" : "rgba(142,163,189,0.75)"; ctx.font = "9px Inter, system-ui, sans-serif";
+  ctx.fillText(`data: ${o.source}`, W - 6, 12);
+  noHalo();
   ctx.restore();
 }

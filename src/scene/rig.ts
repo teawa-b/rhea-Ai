@@ -6,7 +6,7 @@
  * shifted instead (see CameraRig). */
 import { clamp, facingRotation, nearestAngle } from "./geo";
 
-export const DIST: { world: number; country: number; company: number } = { world: 4.6, country: 2.7, company: 1.9 };
+export const DIST: { world: number; country: number; company: number } = { world: 4.8, country: 2.9, company: 2.3 };
 
 export const rig: {
   yaw: number; pitch: number; vy: number; vp: number; dist: number; offsetX: number;

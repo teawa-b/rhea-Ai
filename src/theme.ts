@@ -14,10 +14,23 @@ export const C = {
   magenta: "#ff2e88",
   amber: "#ffb020",
   gold: "#ffd24a",
-  green: "#4ade80",
+  green: "#14F195",      // Solana green
   red: "#ff5a6e",
   white: "#ffffff",
+  /* Solana brand */
+  sol: "#9945FF",        // Solana purple
+  solDeep: "#5a1fb8",
+  solGreen: "#14F195",
+  solInk: "#12071f",
 } as const;
+
+/* Solana purple, deeper the more assets a country lists (0..1 intensity). */
+export function assetTint(intensity: number): string {
+  const t = Math.max(0, Math.min(1, intensity));
+  const a = [63, 224, 255], b = [153, 69, 255];
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * Math.pow(t, 0.55)));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
 
 export const FONT = "'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif";
 export const MONO = "'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace";

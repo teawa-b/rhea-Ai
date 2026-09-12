@@ -3,6 +3,7 @@
  * companies anywhere on the globe. Live price chips come from the market
  * store. Active conditional orders render an "AGENT WATCHING" beacon. */
 import { useFrame } from "@react-three/fiber";
+import { useXR } from "@react-three/xr";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
@@ -12,6 +13,7 @@ import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { HoloLabel } from "./HoloLabel";
 import { R, latLngToVec3 } from "./geo";
+import { DIST, rig } from "./rig";
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -65,9 +67,12 @@ function Tower({ co, mode, lat, lng }: Placed) {
   const towerRef = useRef<THREE.Mesh>(null);
   const haloRef = useRef<THREE.Mesh>(null);
   const beaconRef = useRef<THREE.Group>(null);
+  const rootRef = useRef<THREE.Group>(null);
 
   useFrame((s) => {
     const t = s.clock.elapsedTime;
+    /* Markers shrink as the camera closes in so they never dominate the view. */
+    if (rootRef.current) rootRef.current.scale.setScalar(Math.max(0.42, Math.pow(rig.dist / DIST.world, 0.75)));
     if (towerRef.current) {
       const m = towerRef.current.material as THREE.MeshBasicMaterial;
       const k = (isFocused ? 1.35 : isHot ? 1.15 : 0.9) + Math.sin(t * 2.4 + pos.x * 7) * 0.12;
@@ -89,7 +94,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
   const showLabel = isFocused || isHot || (mode === "hero" && view !== "company");
 
   return (
-    <group position={pos} quaternion={quat}>
+    <group ref={rootRef} position={pos} quaternion={quat}>
       {/* spire: a thin luminous column with a soft additive sheath */}
       <mesh ref={towerRef} position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id); }}>
         <cylinderGeometry args={[0.005, 0.009, height, 8]} />
@@ -147,6 +152,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
 }
 
 export function CompanyMarkers() {
+  const inXR = useXR((s) => s.mode) != null;
   const view = useWorld((s) => s.view);
   const focusedCountry = useWorld((s) => s.focusedCountry);
   const focusedCompany = useWorld((s) => s.focusedCompany);
@@ -172,8 +178,10 @@ export function CompanyMarkers() {
     if (focusedCompany) ids.add(focusedCompany);
     const list = [...ids].map((id) => COMPANY_BY_ID[id]).filter(Boolean);
     /* In country view show every company with HQ; hero = featured or focused. */
-    return spreadClusters(list.map((co) => ({ co, mode: (co.featured || co.id === focusedCompany || highlighted.includes(co.id)) ? "hero" as const : "minor" as const })));
-  }, [view, focusedCountry, focusedCompany, highlighted, comparison, overview, orders]);
+    const placed = list.map((co) => ({ co, mode: (co.featured || co.id === focusedCompany || highlighted.includes(co.id)) ? "hero" as const : "minor" as const }));
+    /* Quest draw-call budget: skip minor towers inside a headset session. */
+    return spreadClusters(inXR ? placed.filter((p) => p.mode === "hero") : placed);
+  }, [view, focusedCountry, focusedCompany, highlighted, comparison, overview, orders, inXR]);
 
   /* Keep chips live: poll prices for visible companies. */
   const idsKey = visible.map((v) => v.co.id).join(",");

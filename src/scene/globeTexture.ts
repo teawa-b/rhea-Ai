@@ -57,7 +57,16 @@ function tracePolygons(ctx: CanvasRenderingContext2D, rings: Ring[], w: number, 
 
 export type BaseMap = { texture: THREE.CanvasTexture; landIndex: Uint16Array; codeByIndex: (CountryCode | null)[] };
 
-export function buildBaseMap(supported: Set<CountryCode>): BaseMap {
+/* `intensity` maps supported country -> 0..1 (share of listed assets). Countries
+ * with more tokenized stocks glow a deeper Solana purple. */
+export function buildBaseMap(intensity: Map<CountryCode, number>): BaseMap {
+  const supported = new Set(intensity.keys());
+  const tint = (code: CountryCode | null, alpha: number) => {
+    const t = code ? intensity.get(code) ?? 0 : 0;
+    const k = Math.pow(t, 0.55);
+    const r = Math.round(63 + (153 - 63) * k), g = Math.round(224 + (69 - 224) * k), b = 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  };
   const feats = loadFeatures();
   const cv = document.createElement("canvas");
   cv.width = W; cv.height = H;
@@ -89,15 +98,17 @@ export function buildBaseMap(supported: Set<CountryCode>): BaseMap {
   const landIndex = new Uint16Array(W * H);
   for (let p = 0, i = 0; p < idData.length; p += 4, i++) landIndex[i] = (idData[p] << 8) | idData[p + 1];
 
-  /* Soft land glow + borders. Supported countries get a warmer, brighter fill. */
+  /* Soft land glow + borders. Supported countries fill with Solana purple,
+   * deeper the more assets they list; the rest stay a faint schematic blue. */
   for (const f of feats) {
     const code = ISO_NUMERIC_TO_CODE[f.id] ?? null;
     const isSupported = code != null && supported.has(code);
+    const t = isSupported ? intensity.get(code!) ?? 0 : 0;
     tracePolygons(ctx, f.rings, W, H);
-    ctx.fillStyle = isSupported ? "rgba(63,224,255,0.085)" : "rgba(63,224,255,0.03)";
+    ctx.fillStyle = isSupported ? tint(code, 0.10 + 0.22 * Math.pow(t, 0.55)) : "rgba(63,224,255,0.03)";
     ctx.fill();
     ctx.lineWidth = isSupported ? 1.6 : 0.9;
-    ctx.strokeStyle = isSupported ? "rgba(143,232,255,0.42)" : "rgba(63,224,255,0.16)";
+    ctx.strokeStyle = isSupported ? tint(code, 0.55) : "rgba(63,224,255,0.16)";
     ctx.stroke();
   }
 
@@ -132,9 +143,14 @@ export function buildBaseMap(supported: Set<CountryCode>): BaseMap {
       const on = code != null && supported.has(code);
       const jitter = ((x * 7919 + y * 104729) % 97) / 97;
       const r = on ? 2.0 + jitter * 0.6 : 1.5 + jitter * 0.5;
-      ctx.fillStyle = on
-        ? `rgba(143,232,255,${0.55 + jitter * 0.35})`
-        : `rgba(96,150,200,${0.22 + jitter * 0.18})`;
+      if (on) {
+        /* dots blend from frost-cyan to Solana purple with asset share */
+        const t = Math.pow(intensity.get(code!) ?? 0, 0.55);
+        const cr = Math.round(143 + (190 - 143) * t), cg = Math.round(232 + (120 - 232) * t), cb = 255;
+        ctx.fillStyle = `rgba(${cr},${cg},${cb},${0.55 + jitter * 0.35})`;
+      } else {
+        ctx.fillStyle = `rgba(96,150,200,${0.22 + jitter * 0.18})`;
+      }
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
     }
   }
@@ -191,11 +207,11 @@ export function buildHighlightMap(): HighlightMap {
     }
     for (const code of highlighted) {
       if (code === focused) continue;
-      paint(code, "rgba(63,224,255,0.16)", "rgba(143,232,255,0.7)", 1.6);
+      paint(code, "rgba(153,69,255,0.18)", "rgba(143,232,255,0.7)", 1.6);
     }
     if (focused) {
       const p = 0.5 + 0.5 * Math.sin(pulse * Math.PI * 2);
-      paint(focused, `rgba(63,224,255,${0.22 + 0.12 * p})`, `rgba(255,255,255,${0.75 + 0.25 * p})`, 2.2);
+      paint(focused, `rgba(153,69,255,${0.24 + 0.14 * p})`, `rgba(255,255,255,${0.75 + 0.25 * p})`, 2.2);
     }
     texture.needsUpdate = true;
   };

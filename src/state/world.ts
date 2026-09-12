@@ -74,13 +74,16 @@ const nextId = (p: string) => `${p}_${++idCounter}_${Date.now().toString(36)}`;
 
 /** Resolve "Nvidia" / "China" / "TSMx" to a lat/lng + label. */
 export function resolvePlace(q: string): { lat: number; lng: number; label: string; kind: "country" | "company"; id: string } | null {
+  /* Countries win on an exact name/alias; companies otherwise. */
+  const cdExact = resolveCountry(q);
   const co = resolveCompany(q);
+  const cd = cdExact && (!co || cdExact.name.toLowerCase() === q.trim().toLowerCase() || q.trim().length <= 3) ? cdExact : null;
+  if (cd) return { lat: cd.lat, lng: cd.lng, label: cd.name, kind: "country", id: cd.code };
   if (co) {
     const hq = co.headquarters ?? COUNTRIES[co.countryCode];
     return { lat: hq.lat, lng: hq.lng, label: co.name, kind: "company", id: co.id };
   }
-  const cd = resolveCountry(q);
-  if (cd) return { lat: cd.lat, lng: cd.lng, label: cd.name, kind: "country", id: cd.code };
+  if (cdExact) return { lat: cdExact.lat, lng: cdExact.lng, label: cdExact.name, kind: "country", id: cdExact.code };
   return null;
 }
 

@@ -30,14 +30,13 @@ app.get("/api/health", (_req, res) => res.json({ ok: true, at: new Date().toISOS
 app.post("/api/live/session", createLiveSession);
 app.use("/api/market", marketRouter());
 
-if (isProd) {
-  const dist = resolve("dist");
-  if (existsSync(dist)) {
-    app.use(express.static(dist, { maxAge: "1h", index: false }));
-    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(resolve(dist, "index.html")));
-  } else {
-    console.warn("[server] dist/ not found — run `npm run build` first");
-  }
+/* Serve the built client whenever it exists (production, or `npm start` locally). */
+const dist = resolve("dist");
+if (existsSync(dist)) {
+  app.use(express.static(dist, { maxAge: "1h", index: false }));
+  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(resolve(dist, "index.html")));
+} else if (isProd) {
+  console.warn("[server] dist/ not found — run `npm run build` first");
 }
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
