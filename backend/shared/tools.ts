@@ -53,6 +53,12 @@ export const RHEA_TOOLS: ToolDef[] = [
   },
   {
     type: "function",
+    name: "show_holdings",
+    description: "Fly away from Earth to the user's holdings planet: their USDC, SOL and every tokenized-stock position orbit it as labelled moons, with the portfolio panel open. Use for \"show me my holdings / portfolio / wallet / balances\". Returns the balances and positions to speak. reset_globe or any focus_* flies back to Earth.",
+    parameters: obj({}),
+  },
+  {
+    type: "function",
     name: "reset_globe",
     description: "Pull the camera back to the full world view and clear focus (keeps highlights/connections unless clear=true).",
     parameters: obj({ clear: { type: "boolean", description: "Also clear highlights and connections." } }),

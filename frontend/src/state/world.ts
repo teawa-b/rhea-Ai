@@ -53,10 +53,14 @@ type WorldState = {
   /** False while the camera is still flying to a newly focused place; the side
    * panel waits for arrival so the globe moves first and the panel follows. */
   panelReady: boolean;
+  /** True while the camera is away at the holdings planet (USDC, SOL, stock moons). */
+  vault: boolean;
   /** Bumps whenever something the AI should know about changes (for UI context). */
   contextVersion: number;
 
   revealPanel: () => void;
+  /** Fly to the holdings planet; any focus / reset brings the camera back to Earth. */
+  showHoldings: () => void;
   focusRegion: (q: string) => string | null;
   focusCountry: (q: string) => CountryCode | null;
   focusCompany: (q: string) => string | null;
@@ -124,15 +128,22 @@ export const useWorld = create<WorldState>((set, get) => ({
   comparison: null,
   streetViewCompany: null,
   panelReady: true,
+  vault: false,
   contextVersion: 0,
 
   revealPanel: () => { clearTimeout(revealTimer); set({ panelReady: true }); },
+  showHoldings: () => {
+    clearTimeout(revealTimer);
+    /* Leave any focused place so Earth is back at the world view on return. */
+    set((s) => ({ vault: true, view: "world", focusedRegion: null, focusedCountry: null, focusedCompany: null, comparison: null, streetViewCompany: null, panelReady: true, contextVersion: s.contextVersion + 1 }));
+  },
 
   focusRegion: (q) => {
     const region = resolveRegion(q);
     if (!region) return null;
     set((s) => ({
       view: "region",
+      vault: false,
       focusedRegion: region.id,
       focusedCountry: null,
       focusedCompany: null,
@@ -150,6 +161,7 @@ export const useWorld = create<WorldState>((set, get) => ({
     if (!cd) return null;
     set((s) => ({
       view: "country",
+      vault: false,
       focusedRegion: null,
       focusedCountry: cd.code,
       focusedCompany: null,
@@ -167,6 +179,7 @@ export const useWorld = create<WorldState>((set, get) => ({
     if (!co) return null;
     set((s) => ({
       view: "company",
+      vault: false,
       focusedRegion: null,
       focusedCompany: co.id,
       focusedCountry: co.countryCode,
@@ -184,6 +197,7 @@ export const useWorld = create<WorldState>((set, get) => ({
     clearTimeout(revealTimer);
     set((s) => ({
       view: "world",
+      vault: false,
       focusedRegion: null,
       focusedCountry: null,
       focusedCompany: null,
@@ -256,6 +270,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       comparison: { companyIds: ids },
       highlightedCompanies: [...new Set([...s.highlightedCompanies, ...ids])],
       view: "world",
+      vault: false,
       focusedRegion: null,
       focusedCompany: null,
       focusedCountry: null,
@@ -272,6 +287,7 @@ export function describeWorld(): string {
   const s = useWorld.getState();
   const parts: string[] = [];
   parts.push(`View: ${s.view}.`);
+  if (s.vault) parts.push("Showing the holdings planet (USDC, SOL and stock positions orbiting it) instead of Earth.");
   if (s.focusedRegion) parts.push(`Focused region: ${REGION_BY_ID[s.focusedRegion]?.name}.`);
   if (s.focusedCountry) parts.push(`Focused country: ${COUNTRIES[s.focusedCountry].name}.`);
   if (s.focusedCompany) {

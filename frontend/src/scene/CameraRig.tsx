@@ -57,6 +57,22 @@ const _zero = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 
 const _fwd = new THREE.Vector3();
+
+/* ---------------- Holdings planet travel ----------------
+ * Desktop: the planet sits out in space and the camera flies there on an arc.
+ * Headset: the user can't be moved, so Earth shrinks aside and the planet
+ * grows in at the focal point instead. `travel.k` is the eased 0→1 blend. */
+export const PLANET_POS = new THREE.Vector3(14, 2, -10);
+/** Headset: where the holdings planet floats (head-anchor space) and its full size. */
+export const XR_PLANET_POS = new THREE.Vector3(-0.1, 1.34, -1.2);
+export const XR_PLANET_SCALE = 0.2;
+export const travel = { t: 0, k: 0 };
+const TRAVEL_S = 2.2;
+const _camA = new THREE.Vector3();
+const _camB = new THREE.Vector3();
+const _lookA = new THREE.Vector3();
+const _lookB = new THREE.Vector3();
+const _look = new THREE.Vector3();
 const headAnchor = { frames: 0, locked: false };
 
 /** Re-seat the headset layout in front of the user's current head pose. */
@@ -159,6 +175,11 @@ export function CameraRig({ children }: { children: ReactNode }) {
       rig.offsetX = damp(rig.offsetX, inXR ? 0 : rig.targetOffsetX, 4, dt);
     }
 
+    /* Linear progress toward the vault, eased for the camera. */
+    const toVault = useWorld.getState().vault;
+    travel.t = clamp(travel.t + (toVault ? 1 : -1) * Math.min(0.1, rawDt) / TRAVEL_S, 0, 1);
+    travel.k = easeInOut(travel.t);
+
     g.rotation.set(0, 0, 0);
     g.rotateOnWorldAxis(Y_AXIS, rig.yaw);
     g.rotateOnWorldAxis(X_AXIS, rig.pitch);
@@ -185,10 +206,14 @@ export function CameraRig({ children }: { children: ReactNode }) {
       _q.setFromRotationMatrix(_m);
       g.quaternion.premultiply(_q);
 
-      /* Centre = focal point pulled back one radius along the head direction. */
-      g.scale.setScalar(s);
-      g.position.copy(_focal).addScaledVector(x.dir, -s);
-      xrGlobe.pos.copy(g.position); xrGlobe.scale = s; xrGlobe.chartK = x.chartK;
+      /* Centre = focal point pulled back one radius along the head direction.
+       * While the holdings planet is up, Earth shrinks and drifts off to the left. */
+      const away = travel.k;
+      const sEarth = s * (1 - 0.7 * away);
+      g.scale.setScalar(sEarth);
+      g.position.copy(_focal).addScaledVector(x.dir, -sEarth);
+      g.position.x -= 0.55 * away; g.position.y -= 0.12 * away; g.position.z -= 0.35 * away;
+      xrGlobe.pos.copy(g.position); xrGlobe.scale = sEarth; xrGlobe.chartK = x.chartK;
     } else {
       g.scale.setScalar(1);
       g.position.set(0, 0, 0);
@@ -197,9 +222,24 @@ export function CameraRig({ children }: { children: ReactNode }) {
       const fit = Math.max(1, 1.05 / aspect);
       const d = rig.dist * fit;
       /* Panel offset shrinks on narrow viewports where the panel overlays instead. */
-      const ox = -rig.offsetX * (d / DIST.world) * Math.min(1, Math.max(0, (aspect - 0.9) / 0.6));
-      camera.position.set(ox, 0, d);
-      camera.lookAt(ox, 0, 0);
+      const wide = Math.min(1, Math.max(0, (aspect - 0.9) / 0.6));
+      const ox = -rig.offsetX * (d / DIST.world) * wide;
+      if (travel.k <= 0) {
+        camera.position.set(ox, 0, d);
+        camera.lookAt(ox, 0, 0);
+      } else {
+        /* Earth view → holdings planet, framed left of the portfolio panel, on a rising arc. */
+        _camA.set(ox, 0, d); _lookA.set(ox, 0, 0);
+        const side = 1.15 * wide;
+        _lookB.copy(PLANET_POS).add(_look.set(side, 0.3, 0));
+        _camB.copy(_lookB).add(_look.set(0, 1.1, 6.6 * fit));
+        const k = travel.k;
+        camera.position.lerpVectors(_camA, _camB, k);
+        camera.position.y += Math.sin(Math.PI * k) * 1.8;
+        /* Face the destination early in the trip: the planet going out, Earth coming back. */
+        _look.lerpVectors(_lookA, _lookB, toVault ? THREE.MathUtils.smoothstep(k, 0, 0.4) : THREE.MathUtils.smoothstep(k, 0.6, 1));
+        camera.lookAt(_look);
+      }
     }
   });
 

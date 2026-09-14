@@ -265,6 +265,24 @@ export function createToolRunner(getAuth: () => RheaAuth) {
           activeOrders: m.orders.filter((o) => o.status === "active").map(describeRule),
         };
       }
+      case "show_holdings": {
+        const auth = getAuth();
+        if (!auth.authenticated) {
+          m.setLoginPrompt({ reason: "Sign in to see your holdings" });
+          return { ok: false, error: "User is not signed in. A sign-in panel is now showing: ask them to sign in there; their holdings planet opens once they're in." };
+        }
+        w.showHoldings();
+        const p = await m.loadPortfolio();
+        if (!p) throw new Error("Could not read the wallet");
+        return {
+          ok: true, shown: "holdings planet",
+          usdcBalance: Number(p.usdcBalance.toFixed(2)), solBalance: Number(p.solBalance.toFixed(4)),
+          stocks: p.positions.map((pos) => ({ company: COMPANY_BY_ID[pos.companyId].name, symbol: pos.symbol, tokens: Number(pos.amountUi.toFixed(4)), valueUsd: pos.valueUsd == null ? null : Number(pos.valueUsd.toFixed(2)) })),
+          stocksValueUsd: Number(p.positions.reduce((s, x) => s + (x.valueUsd ?? 0), 0).toFixed(2)),
+          totalValueUsd: Number(p.totalValueUsd.toFixed(2)),
+          note: "totalValueUsd is USDC plus stocks; SOL is held for network fees and not priced here.",
+        };
+      }
       case "get_swap_quote": {
         const auth = getAuth();
         const co = needCompany(str(args.company));

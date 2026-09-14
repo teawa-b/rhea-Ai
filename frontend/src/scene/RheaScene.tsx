@@ -14,6 +14,7 @@ import { CompanyMarkers } from "./CompanyMarkers";
 import { Connections } from "./Connections";
 import { CountryPins } from "./CountryPins";
 import { Globe, Stars } from "./Globe";
+import { HoldingsPlanet } from "./HoldingsPlanet";
 import { RheaController } from "./XRController";
 import { XRPanels } from "./XRPanels";
 
@@ -91,6 +92,7 @@ export function RheaScene() {
               <CompanyMarkers />
               <Connections />
             </CameraRig>
+            <HoldingsPlanet />
             <XRPanels />
           </XrHeadAnchor>
         </Suspense>

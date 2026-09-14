@@ -64,6 +64,9 @@ export function Hud() {
   const focusCompany = useWorld((s) => s.focusCompany);
   const focusCountry = useWorld((s) => s.focusCountry);
   const panelReady = useWorld((s) => s.panelReady);
+  /* The portfolio panel rides along with the holdings planet. */
+  const showPortfolio = useWorld((s) => s.vault);
+  const showHoldings = useWorld((s) => s.showHoldings);
 
   const voiceState = useVoice((s) => s.state);
   const inputMode = useVoice((s) => s.inputMode);
@@ -82,7 +85,6 @@ export function Hud() {
 
   const [text, setText] = useState("");
   const [xrMode, setXrMode] = useState<"immersive-ar" | "immersive-vr" | null>(null);
-  const [showPortfolio, setShowPortfolio] = useState(false);
   const capRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -147,7 +149,7 @@ export function Hud() {
           {status && !status.openai ? <span className="chip dim" title="Set OPENAI_API_KEY on the server"><i className="dot err" />voice offline</span> : null}
           {auth.authenticated ? (
             <>
-              <button className="chip clickable" onClick={() => setShowPortfolio((v) => !v)} title={auth.address ?? ""}>
+              <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings())} title={showPortfolio ? "Back to Earth" : "Fly to your holdings"}>
                 <i className="dot on" />{portfolio ? fmtUsd(portfolio.totalValueUsd) : "…"} · {auth.displayName}
               </button>
               <button className="btn ghost sm" onClick={() => void auth.logout()}>Sign out</button>
@@ -163,7 +165,7 @@ export function Hud() {
       {/* ---------- stage ---------- */}
       <div className={`stage ${showPanel ? "" : "no-panel"}`}>
         <div className="left">
-          {view !== "world" || comparison ? (
+          {view !== "world" || comparison || showPortfolio ? (
             <nav className="crumbs clickable" aria-label="Where you are">
               <button className="crumb-back" onClick={goBack} title="Back" aria-label="Back"><ChevronLeftIcon size={16} /></button>
               <button className="crumb" onClick={() => resetGlobe(false)}><GlobeIcon size={14} />World</button>
@@ -178,6 +180,7 @@ export function Hud() {
               ) : null}
               {focusedCompany ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">{COMPANY_BY_ID[focusedCompany]?.name}</span></>) : null}
               {comparison ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Compare</span></>) : null}
+              {showPortfolio ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Holdings</span></>) : null}
             </nav>
           ) : null}
           <div className="captions scroll" ref={capRef} style={{ maxHeight: "34vh" }}>
@@ -195,7 +198,7 @@ export function Hud() {
             {pendingTrade ? <TradePanel /> : null}
             {pendingOrder ? <OrderPanel /> : null}
             {gatePanel ? (depositPrompt ? <DepositPanel /> : <LoginPanel />) : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && showPortfolio ? <PortfolioPanel onClose={() => setShowPortfolio(false)} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && showPortfolio ? <PortfolioPanel onClose={() => resetGlobe(false)} /> : null}
             {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && comparison ? (
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>Compare</h2><div className="sub">token price · 24h · underlying</div></div><button className="btn ghost sm" onClick={() => resetGlobe(false)}>✕</button></div>
@@ -271,7 +274,7 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
     <div className="panel clickable">
       <div className="panel-head">
         <div><h2>Portfolio</h2><div className="sub">{auth.address ? `${auth.address.slice(0, 6)}…${auth.address.slice(-6)}` : ""} · Solana</div></div>
-        <div className="row"><button className="btn ghost sm" onClick={() => setCountryHeat(Object.fromEntries([...byCountry].map(([k, v]) => [k, v / total])))}>Show on globe</button><button className="btn ghost sm" onClick={onClose}>✕</button></div>
+        <div className="row"><button className="btn ghost sm" onClick={() => { setCountryHeat(Object.fromEntries([...byCountry].map(([k, v]) => [k, v / total]))); useWorld.getState().resetGlobe(false); }}>Show on Earth</button><button className="btn ghost sm" onClick={onClose}>✕</button></div>
       </div>
       <div className="panel-body scroll">
         <div className="big">{fmtUsd(portfolio?.totalValueUsd)}</div>
