@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
-import { enterImmersive } from "@/scene/RheaScene";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { fmtPct, fmtUsd } from "@/theme";
@@ -15,6 +14,7 @@ import { NewsCards, ImpactCard } from "./NewsCards";
 import { RegionPanel } from "./RegionPanel";
 import { REGION_BY_ID } from "@/state/regions";
 import { DepositPanel, LoginPanel, OrderPanel, TradePanel } from "./TradePanel";
+import { XrLaunch } from "./XrLaunch";
 
 function SolanaMark() {
   /* Solana's three-bar mark, gradient purple → green. */
@@ -155,13 +155,10 @@ export function Hud() {
           ) : (
             <button className="btn primary sm" onClick={auth.login} disabled={!auth.ready}>{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in"}</button>
           )}
-          {xrMode ? (
-            <button className="btn sol sm" onClick={() => { void connect(auth); void enterImmersive(); }} title={xrMode === "immersive-ar" ? "Passthrough mixed reality (Quest)" : "Immersive VR"}>
-              ◎ {xrMode === "immersive-ar" ? "Enter Mixed Reality" : "Enter VR"}
-            </button>
-          ) : null}
         </div>
       </div>
+
+      {xrMode ? <XrLaunch mode={xrMode} /> : null}
 
       {/* ---------- stage ---------- */}
       <div className={`stage ${showPanel ? "" : "no-panel"}`}>
