@@ -5,7 +5,7 @@ import { COMPANY_BY_ID } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
 import { useMarket } from "@/state/market";
-import { confirmTrade, confirmTrigger, describeRule } from "@/solana/trade";
+import { confirmTrade, confirmTrigger, describeIntent, describeRule } from "@/solana/trade";
 import { fmtAge, fmtUsd } from "@/theme";
 
 export function TradePanel() {
@@ -118,6 +118,78 @@ export function OrderPanel() {
           {pending.status === "pending" || isCancel ? <button className={`btn ${isCancel ? "danger" : "amber"}`} disabled={busy} onClick={onConfirm}>{busy ? "Signing…" : isCancel ? "Cancel order" : "Confirm"}</button> : null}
         </div>
         {!isCancel ? <div className="hint" style={{ marginTop: 8 }}>Funds move into a Jupiter vault and the keeper executes when the price condition is met. Confirm to sign the deposit.</div> : null}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Sign-in / funding gates ----------------
+ * Opened by the trade flow (and by Rhea's tools) when a trade is asked for
+ * while signed out or while the wallet lacks USDC. IntentResumer in App.tsx
+ * picks the trade up again once the blocker clears. */
+
+export function LoginPanel() {
+  const auth = useAuth();
+  const prompt = useMarket((s) => s.loginPrompt);
+  const setPrompt = useMarket((s) => s.setLoginPrompt);
+  if (!prompt) return null;
+  return (
+    <div className="panel clickable">
+      <div className="panel-head">
+        <div><h2>Sign in to trade</h2><div className="sub">{prompt.reason}</div></div>
+        <button className="btn ghost sm" onClick={() => setPrompt(null)} aria-label="Close">✕</button>
+      </div>
+      <div className="panel-body">
+        <p className="hint" style={{ margin: "0 0 12px", fontSize: 12.5, color: "#dfe9f5" }}>
+          Sign in with Google, email or a Solana wallet. New accounts get an embedded Solana wallet in seconds — Rhea never holds your keys.
+          {prompt.resume ? ` Your ${describeIntent(prompt.resume)} will continue right after.` : ""}
+        </p>
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn ghost" onClick={() => setPrompt(null)}>Later</button>
+          <button className="btn primary" onClick={auth.login} disabled={!auth.ready}>{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function DepositPanel() {
+  const auth = useAuth();
+  const prompt = useMarket((s) => s.depositPrompt);
+  const setPrompt = useMarket((s) => s.setDepositPrompt);
+  const loadPortfolio = useMarket((s) => s.loadPortfolio);
+  const portfolio = useMarket((s) => s.portfolio);
+  const [copied, setCopied] = useState(false);
+  const [checking, setChecking] = useState(false);
+  if (!prompt) return null;
+  const have = portfolio?.usdcBalance ?? prompt.haveUsd;
+  const missing = Math.max(0, prompt.neededUsd - have);
+  const copy = () => { if (auth.address) void navigator.clipboard?.writeText(auth.address).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); };
+  return (
+    <div className="panel clickable">
+      <div className="panel-head">
+        <div><h2>Fund your wallet</h2><div className="sub">USDC on Solana · {fmtUsd(missing)} more needed</div></div>
+        <button className="btn ghost sm" onClick={() => setPrompt(null)} aria-label="Close">✕</button>
+      </div>
+      <div className="panel-body">
+        <dl className="kv">
+          <dt>Wallet USDC</dt><dd>{fmtUsd(have)}</dd>
+          <dt>This trade needs</dt><dd>{fmtUsd(prompt.neededUsd)}</dd>
+        </dl>
+        <div className="divider" />
+        <div className="hint">SEND USDC (SOLANA) TO</div>
+        <div className="mono" style={{ fontSize: 12, wordBreak: "break-all", margin: "6px 0 10px", color: "#e8f4ff" }}>{auth.address ?? "—"}</div>
+        <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <button className="btn sm" onClick={copy}>{copied ? "Copied" : "Copy address"}</button>
+          <div className="row">
+            <button className="btn ghost sm" onClick={() => setPrompt(null)}>Later</button>
+            <button className="btn primary sm" disabled={checking} onClick={() => { setChecking(true); void loadPortfolio().finally(() => setChecking(false)); }}>{checking ? "Checking…" : "I've sent it"}</button>
+          </div>
+        </div>
+        <div className="hint" style={{ marginTop: 10 }}>
+          Send from an exchange or another wallet on the Solana network only. Keep a little SOL (~0.01) in the wallet for network fees.
+          {prompt.resume ? ` Your ${describeIntent(prompt.resume)} continues automatically when the USDC lands.` : ""}
+        </div>
       </div>
     </div>
   );

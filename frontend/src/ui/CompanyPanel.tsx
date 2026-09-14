@@ -6,7 +6,7 @@ import { useAuth } from "@/auth/Auth";
 import { api } from "@/market/api";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
-import { prepareTrade, prepareTrigger, describeRule } from "@/solana/trade";
+import { isGated, prepareTrade, prepareTrigger, describeRule } from "@/solana/trade";
 import { fmtAge, fmtPct, fmtUsd } from "@/theme";
 import { Chart } from "./Chart";
 import { CloseIcon } from "./icons";
@@ -57,20 +57,21 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const cls = change == null ? "" : change >= 0 ? "pos" : "neg";
   const divergence = p?.tokenPriceUsd && p?.underlyingPriceUsd ? ((p.tokenPriceUsd - p.underlyingPriceUsd) / p.underlyingPriceUsd) * 100 : null;
   const tradable = detail?.asset?.tradable ?? false;
-  const canTrade = auth.authenticated && tradable;
+  /* Signed-out users may still press Buy: prepareTrade opens the sign-in panel. */
+  const canTrade = tradable;
   const companyNews = news && (news.target === co.name || news.items.some((n) => n.companyIds.includes(co.id))) ? news.items : [];
 
   const doBuy = async () => {
     setBusy("buy");
     const r = await prepareTrade(auth, co.id, "buy", amount);
-    if (!r.ok) setError(r.error);
+    if (!r.ok && !isGated(r)) setError(r.error);
     setBusy(null);
   };
   const doSell = async () => {
     if (!pos) return;
     setBusy("sell");
     const r = await prepareTrade(auth, co.id, "sell", pos.amountUi);
-    if (!r.ok) setError(r.error);
+    if (!r.ok && !isGated(r)) setError(r.error);
     setBusy(null);
   };
   const doTrigger = async () => {
@@ -152,7 +153,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         {/* Trade */}
         <div className="divider" />
         <div className="hint" style={{ marginBottom: 6 }}>TRADE · Jupiter · Solana</div>
-        {!auth.authenticated ? <div className="hint">Sign in to trade. Research stays available.</div> : null}
+        {!auth.authenticated ? <div className="hint">Not signed in — Buy opens sign-in. Research stays available.</div> : null}
         {detail && !tradable ? <div className="hint warn">Listed, but no onchain liquidity yet — trading disabled.</div> : null}
         <div className="row" style={{ marginTop: 6 }}>
           <input className="chip mono" type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 96 }} />

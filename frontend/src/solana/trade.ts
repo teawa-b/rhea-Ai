@@ -11,7 +11,7 @@ import { COMPANY_BY_ID, USDC_MINT, resolveCompany } from "@shared/registry";
 import type { AgentRule, TradeIntent, TradeSide } from "@shared/types";
 import type { RheaAuth } from "@/auth/Auth";
 import { api } from "@/market/api";
-import { assetForCompany, useMarket } from "@/state/market";
+import { assetForCompany, useMarket, type PendingIntent } from "@/state/market";
 
 const b64ToBytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 const bytesToB64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
@@ -19,18 +19,47 @@ const uid = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toSt
 
 export type PrepareResult = { ok: true; intent: TradeIntent } | { ok: false; error: string; reasons?: string[] };
 
+/** True when a prepare* call stopped at a sign-in / funding gate: the matching
+ * panel is already showing, so the UI should not also toast the error text. */
+export const isGated = (r: { ok: boolean; reasons?: string[] }) => !r.ok && Boolean(r.reasons?.some((x) => x === "not_authenticated" || x === "insufficient_usdc"));
+
+/* Sign-in / funding gates. Instead of failing quietly they open the matching
+ * panel (login or deposit) and remember what the user wanted, so the trade
+ * resumes by itself once they've signed in or topped up (see resumeIntent). */
+const SIGN_IN_MSG = "The user is not signed in. A sign-in panel is now showing: ask them to sign in there (Google, email or a wallet — it creates a Solana wallet for them); the trade will continue automatically afterwards.";
+
+type Gate = { ok: false; error: string; reasons?: string[] };
+function requireSignIn(auth: RheaAuth, reason: string, resume: PendingIntent): Gate | null {
+  if (auth.authenticated && auth.address) return null;
+  useMarket.getState().setLoginPrompt({ reason, resume });
+  return { ok: false, error: SIGN_IN_MSG, reasons: ["not_authenticated"] };
+}
+
+async function requireUsdc(neededUsd: number, resume: PendingIntent): Promise<Gate | null> {
+  const m = useMarket.getState();
+  const p = m.portfolio ?? (await m.loadPortfolio());
+  if (!p) return null; // can't tell — let the quote decide
+  if (p.usdcBalance >= neededUsd) return null;
+  m.setDepositPrompt({ neededUsd, haveUsd: p.usdcBalance, resume });
+  return { ok: false, error: `The wallet holds $${p.usdcBalance.toFixed(2)} USDC but this needs $${neededUsd.toFixed(2)}. A deposit panel showing the wallet address is now open: ask the user to send USDC on Solana to it; the trade will continue automatically once it arrives.`, reasons: ["insufficient_usdc"] };
+}
+
 export async function prepareTrade(auth: RheaAuth, companyQuery: string, side: TradeSide, amount: number): Promise<PrepareResult> {
   const co = resolveCompany(companyQuery);
   if (!co) return { ok: false, error: `Unknown company "${companyQuery}"` };
   const m = useMarket.getState();
-  if (!auth.authenticated || !auth.address) return { ok: false, error: "Sign in to trade — the app will open the login panel.", reasons: ["not_authenticated"] };
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Amount must be positive." };
+  const resume: PendingIntent = { kind: side, companyId: co.id, amount };
+  const gate = requireSignIn(auth, side === "buy" ? `Sign in to buy $${amount} of ${co.name}` : `Sign in to sell ${co.name}`, resume);
+  if (gate) return gate;
+  if (side === "buy") { const funds = await requireUsdc(amount, resume); if (funds) return funds; }
+  const address = auth.address!;
 
   try {
-    const { quote, asset } = await api.quote(co.id, side, amount, auth.address);
+    const { quote, asset } = await api.quote(co.id, side, amount, address);
     const intent: TradeIntent = {
       id: uid("trade"),
-      userId: auth.address,
+      userId: address,
       assetId: asset.id,
       companyId: co.id,
       side,
@@ -86,14 +115,18 @@ export async function prepareTrigger(auth: RheaAuth, companyQuery: string, kind:
   const asset = assetForCompany(co.id);
   if (!asset) return { ok: false, error: `${co.name} has no tokenized asset yet.` };
   const m = useMarket.getState();
-  if (!auth.authenticated || !auth.address) return { ok: false, error: "Sign in to create orders — the app will open the login panel." };
+  const resume: PendingIntent = { kind: "trigger", companyId: co.id, triggerKind: kind, priceUsd: triggerPriceUsd, amount, expiresInDays };
+  const gate = requireSignIn(auth, `Sign in to set a ${kind === "buy_below" ? "buy" : "sell"} order on ${co.name}`, resume);
+  if (gate) return { ok: false, error: gate.error };
+  if (kind === "buy_below" && amount > 0) { const funds = await requireUsdc(amount, resume); if (funds) return { ok: false, error: funds.error }; }
+  const address = auth.address!;
   const elig = await api.eligibility(co.id, "trigger");
   if (!elig.result.allowed) return { ok: false, error: elig.result.reasons.join(" ") };
   if (!(triggerPriceUsd > 0) || !(amount > 0)) return { ok: false, error: "Price and amount must be positive." };
 
   const rule: AgentRule = {
     id: uid("rule"),
-    userId: auth.address,
+    userId: address,
     assetId: asset.id,
     companyId: co.id,
     type: "price_trigger",
@@ -158,6 +191,22 @@ export async function confirmTrigger(auth: RheaAuth, rule: AgentRule): Promise<A
   const active: AgentRule = { ...rule, status: "active", jupiterOrderId: order.id, txSignature: order.txSignature };
   m.upsertOrder(active); m.setPendingOrder(active);
   return active;
+}
+
+/** Re-runs a trade the user asked for before signing in / funding the wallet. */
+export async function resumeIntent(auth: RheaAuth, intent: PendingIntent): Promise<PrepareResult | { ok: boolean; error?: string }> {
+  if (intent.kind === "trigger") return prepareTrigger(auth, intent.companyId, intent.triggerKind, intent.priceUsd, intent.amount, intent.expiresInDays);
+  return prepareTrade(auth, intent.companyId, intent.kind, intent.amount);
+}
+
+export function describeIntent(intent: PendingIntent) {
+  const co = COMPANY_BY_ID[intent.companyId];
+  if (intent.kind === "trigger") {
+    const buy = intent.triggerKind === "buy_below";
+    return `${buy ? "buy" : "sell"} ${co?.name ?? intent.companyId} when the price is ${buy ? "≤" : "≥"} $${intent.priceUsd}`;
+  }
+  if (intent.kind === "buy") return `buy $${intent.amount} of ${co?.name ?? intent.companyId}`;
+  return `sell ${intent.amount} ${co?.tokenSymbol ?? intent.companyId}`;
 }
 
 export function describeRule(rule: AgentRule) {

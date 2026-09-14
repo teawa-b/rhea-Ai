@@ -156,7 +156,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       }
       case "show_portfolio_exposure": {
         const p = m.portfolio ?? (await m.loadPortfolio());
-        if (!p) throw new Error("No wallet connected — ask the user to sign in");
+        if (!p) { m.setLoginPrompt({ reason: "Sign in to see your portfolio on the globe" }); throw new Error("No wallet connected — a sign-in panel is now showing; ask the user to sign in there"); }
         const dim = str(args.dimension) === "sector" ? "sector" : "country";
         const buckets = new Map<string, number>();
         let total = 0;
@@ -249,7 +249,10 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       }
       case "get_portfolio": {
         const auth = getAuth();
-        if (!auth.authenticated) return { ok: false, error: "User is not signed in. Invite them to sign in with Google or email to get an embedded Solana wallet." };
+        if (!auth.authenticated) {
+          m.setLoginPrompt({ reason: "Sign in to see your portfolio" });
+          return { ok: false, error: "User is not signed in. A sign-in panel is now showing: ask them to sign in there (Google, email or a wallet); it creates an embedded Solana wallet for them." };
+        }
         const p = await m.loadPortfolio();
         if (!p) throw new Error("Could not read the wallet");
         const byCountry = new Map<string, number>();

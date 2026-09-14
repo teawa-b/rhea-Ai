@@ -265,7 +265,15 @@ export class LiveClient {
   setMuted(muted: boolean) {
     this.muted = muted;
     this.mic?.getAudioTracks().forEach((t) => { t.enabled = !muted; });
-    this.send({ type: muted ? "session.input_audio.mute" : "session.input_audio.unmute" });
+    /* Before session.started the channel isn't open; `session.started` re-sends. */
+    if (this.ready) this.send({ type: muted ? "session.input_audio.mute" : "session.input_audio.unmute" });
+  }
+
+  /** Local playback level (0–1). Push-to-talk ducks Rhea while the user holds
+   * the button so she never talks over them; the model's own barge-in
+   * detection then stops her server-side. */
+  setOutputVolume(v: number) {
+    if (this.audio) this.audio.volume = Math.max(0, Math.min(1, v));
   }
 
   /* ---------------- Events ---------------- */
@@ -277,6 +285,7 @@ export class LiveClient {
     switch (ev.type) {
       case "session.started":
         this.ready = true;
+        if (this.muted) this.send({ type: "session.input_audio.mute" });
         this.setState("idle");
         break;
 

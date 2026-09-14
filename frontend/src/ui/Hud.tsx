@@ -14,7 +14,7 @@ import { ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
 import { RegionPanel } from "./RegionPanel";
 import { REGION_BY_ID } from "@/state/regions";
-import { OrderPanel, TradePanel } from "./TradePanel";
+import { DepositPanel, LoginPanel, OrderPanel, TradePanel } from "./TradePanel";
 
 function SolanaMark() {
   /* Solana's three-bar mark, gradient purple → green. */
@@ -48,6 +48,8 @@ export function Hud() {
   const setError = useMarket((s) => s.setError);
   const pendingTrade = useMarket((s) => s.pendingTrade);
   const pendingOrder = useMarket((s) => s.pendingOrder);
+  const loginPrompt = useMarket((s) => s.loginPrompt);
+  const depositPrompt = useMarket((s) => s.depositPrompt);
   const prices = useMarket((s) => s.prices);
 
   const view = useWorld((s) => s.view);
@@ -119,7 +121,8 @@ export function Hud() {
 
   /* A focused place's panel waits until the camera has arrived (panelReady). */
   const placePanel = panelReady && (focusedCompany || focusedCountry || focusedRegion);
-  const showPanel = pendingTrade || pendingOrder || placePanel || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
+  const gatePanel = !pendingTrade && !pendingOrder && (depositPrompt || loginPrompt);
+  const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
   const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
 
@@ -194,8 +197,9 @@ export function Hud() {
           <div className="right">
             {pendingTrade ? <TradePanel /> : null}
             {pendingOrder ? <OrderPanel /> : null}
-            {!pendingTrade && !pendingOrder && showPortfolio ? <PortfolioPanel onClose={() => setShowPortfolio(false)} /> : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && comparison ? (
+            {gatePanel ? (depositPrompt ? <DepositPanel /> : <LoginPanel />) : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && showPortfolio ? <PortfolioPanel onClose={() => setShowPortfolio(false)} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && comparison ? (
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>Compare</h2><div className="sub">token price · 24h · underlying</div></div><button className="btn ghost sm" onClick={() => resetGlobe(false)}>✕</button></div>
                 <div className="panel-body">
@@ -213,10 +217,10 @@ export function Hud() {
                 </div>
               </div>
             ) : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && focusedRegion ? <RegionPanel key={focusedRegion} id={focusedRegion} /> : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && !focusedCompany && !focusedCountry && !focusedRegion && (news || impact || heatEntries.length) ? (
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && focusedRegion ? <RegionPanel key={focusedRegion} id={focusedRegion} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !focusedCompany && !focusedCountry && !focusedRegion && (news || impact || heatEntries.length) ? (
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>{heatEntries.length ? "Portfolio geography" : news?.target ?? "Research"}</h2><div className="sub">{heatEntries.length ? "exposure by country" : "sources"}</div></div><button className="btn ghost sm" onClick={() => resetGlobe(true)}>✕</button></div>
                 <div className="panel-body scroll">

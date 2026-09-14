@@ -21,12 +21,20 @@ type VoiceStore = {
   /** Non-fatal heads-up, e.g. the mic was blocked so Rhea switched to text mode. */
   notice: string | null;
   muted: boolean;
+  /** Push-to-talk (headset): the mic is closed except while a button is held. */
+  pushToTalk: boolean;
+  /** True while the user is holding the talk button. */
+  holding: boolean;
   /** Starts a session: with the mic by default, or text-only (no mic prompt). */
   connect: (auth: RheaAuth, input?: InputMode) => Promise<void>;
   /** From text mode, reconnect with the mic and keep the conversation so far. */
   switchToVoice: (auth: RheaAuth) => Promise<void>;
   disconnect: () => void;
   toggleMute: () => void;
+  /** Switches between open-mic (desktop) and push-to-talk (headset). */
+  setPushToTalk: (on: boolean) => void;
+  /** Hold-to-speak: opens the mic and ducks Rhea while held; connects first if needed. */
+  setHold: (on: boolean, auth?: RheaAuth) => void;
   /** Sends typed text, opening a text-only session first if none is running. */
   sendText: (text: string, auth?: RheaAuth) => void;
   announce: (text: string) => void;
@@ -70,6 +78,8 @@ export const useVoice = create<VoiceStore>((set, get) => {
     error: null,
     notice: null,
     muted: false,
+    pushToTalk: false,
+    holding: false,
 
     connect: async (auth, input = "mic") => {
       authRef = auth;
@@ -94,6 +104,8 @@ export const useVoice = create<VoiceStore>((set, get) => {
       try {
         await client.connect({ context: buildContext(auth), history, input });
         const live = client;
+        /* Push-to-talk starts closed unless the button is already down. */
+        if (get().pushToTalk && !get().holding) { live.setMuted(true); set({ muted: true }); }
         /* After session.started: answer queued typed questions, otherwise greet
          * (unless resuming a conversation). Poll since events are async. */
         const started = Date.now();
@@ -125,7 +137,7 @@ export const useVoice = create<VoiceStore>((set, get) => {
     disconnect: () => {
       get().client?.close();
       queued = [];
-      set({ client: null, state: "off" });
+      set({ client: null, state: "off", holding: false });
     },
 
     toggleMute: () => {
@@ -133,6 +145,31 @@ export const useVoice = create<VoiceStore>((set, get) => {
       const muted = !get().muted;
       c?.setMuted(muted);
       set({ muted });
+    },
+
+    setPushToTalk: (on) => {
+      if (get().pushToTalk === on) return;
+      const c = get().client;
+      /* Entering the headset closes the mic until a button is held; leaving reopens it. */
+      c?.setMuted(on);
+      c?.setOutputVolume(1);
+      set({ pushToTalk: on, holding: false, muted: on });
+    },
+
+    setHold: (on, auth) => {
+      const { client, holding, state } = get();
+      if (on === holding) return;
+      set({ holding: on });
+      if (on && (!client || state === "error")) {
+        const a = auth ?? authRef;
+        if (a) void get().connect(a, "mic");
+        return;
+      }
+      if (!client) return;
+      client.setMuted(!on);
+      /* Duck Rhea while the user talks so she never speaks over them. */
+      client.setOutputVolume(on ? 0.12 : 1);
+      set({ muted: !on });
     },
 
     sendText: (text, auth) => {

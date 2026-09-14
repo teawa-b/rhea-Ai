@@ -3,6 +3,14 @@ import { create } from "zustand";
 import type { AgentRule, ChartHistory, ChartRange, MarketOverview, Portfolio, TradeIntent } from "@shared/types";
 import { api, type CompanyDetail, type PriceLite, type ServerStatus } from "@/market/api";
 
+/** A trade the user asked for that could not be prepared yet (no sign-in or
+ * no USDC); resumed automatically once the blocker is cleared. */
+export type PendingIntent =
+  | { kind: "buy" | "sell"; companyId: string; amount: number }
+  | { kind: "trigger"; companyId: string; triggerKind: "buy_below" | "sell_above"; priceUsd: number; amount: number; expiresInDays: number };
+export type LoginPrompt = { reason: string; resume?: PendingIntent };
+export type DepositPrompt = { neededUsd: number; haveUsd: number; resume?: PendingIntent };
+
 type MarketState = {
   status: ServerStatus | null;
   overview: MarketOverview | null;
@@ -16,6 +24,10 @@ type MarketState = {
   /** The trade / order currently awaiting the user's confirmation. */
   pendingTrade: TradeIntent | null;
   pendingOrder: AgentRule | null;
+  /** "Sign in to trade" panel, opened when a trade is asked for while signed out. */
+  loginPrompt: LoginPrompt | null;
+  /** "Fund your wallet" panel, opened when a buy needs more USDC than the wallet holds. */
+  depositPrompt: DepositPrompt | null;
   lastError: string | null;
 
   loadStatus: () => Promise<ServerStatus | null>;
@@ -27,6 +39,8 @@ type MarketState = {
   loadPortfolio: () => Promise<Portfolio | null>;
   setPendingTrade: (t: TradeIntent | null) => void;
   setPendingOrder: (o: AgentRule | null) => void;
+  setLoginPrompt: (p: LoginPrompt | null) => void;
+  setDepositPrompt: (p: DepositPrompt | null) => void;
   recordTrade: (t: TradeIntent) => void;
   upsertOrder: (o: AgentRule) => void;
   removeOrder: (id: string) => void;
@@ -70,6 +84,8 @@ export const useMarket = create<MarketState>((set, get) => ({
   trades: [],
   pendingTrade: null,
   pendingOrder: null,
+  loginPrompt: null,
+  depositPrompt: null,
   lastError: null,
 
   loadStatus: async () => {
@@ -106,6 +122,8 @@ export const useMarket = create<MarketState>((set, get) => ({
   },
   setPendingTrade: (pendingTrade) => set({ pendingTrade }),
   setPendingOrder: (pendingOrder) => set({ pendingOrder }),
+  setLoginPrompt: (loginPrompt) => set({ loginPrompt }),
+  setDepositPrompt: (depositPrompt) => set({ depositPrompt }),
   recordTrade: (t) => set((s) => ({ trades: [t, ...s.trades.filter((x) => x.id !== t.id)].slice(0, 50) })),
   upsertOrder: (o) => set((s) => {
     const orders = [o, ...s.orders.filter((x) => x.id !== o.id)];

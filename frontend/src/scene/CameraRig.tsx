@@ -10,6 +10,7 @@ import { useXR } from "@react-three/xr";
 import { useEffect, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
+import { useMarket } from "@/state/market";
 import { REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
 import { clamp, damp } from "./geo";
@@ -21,15 +22,45 @@ const AUTO_RATE = 0.10;      // rad/s idle drift
 const IDLE_AFTER = 2.2;      // s before drift resumes
 
 /* MR layout: the globe floats left of centre at chest height so the chart
- * cluster can float to the right, both within comfortable reach/view. */
+ * cluster can float to the right, both within comfortable reach/view.
+ *
+ * In a headset the globe is placed by its *surface*, not its centre: the
+ * focused spot always sits at a "focal" point and is turned to face the
+ * user's head, so zooming to Taiwan brings Taiwan toward you instead of
+ * inflating the planet around a point you were viewing at an angle. While a
+ * chart (or a confirmation) is showing, the globe tucks itself down-left and
+ * shrinks so the chart and the captions beneath the globe get the space. */
 export const XR_ANCHOR = new THREE.Vector3(-0.5, 1.3, -1.55);
 export const XR_BASE_SCALE = 0.36;
+/* Surface focal point + scale per state (metres, local-floor space). */
+const XR_FOCAL_WORLD = new THREE.Vector3(-0.38, 1.36, -1.2);
+const XR_FOCAL_NEAR = new THREE.Vector3(-0.34, 1.46, -0.9);
+const XR_FOCAL_CHART = new THREE.Vector3(-0.72, 1.16, -1.25);
+const XR_SCALE_NEAR = 0.54;
+const XR_SCALE_CHART = 0.26;
+/* Where the head is assumed to be until the first XR frame reports it. */
+const XR_HEAD_FALLBACK = new THREE.Vector3(0, 1.5, 0);
+const easeInOut = (t: number) => t * t * (3 - 2 * t);
+
+/** Live globe placement in the headset, read by the captions / voice orb so
+ * they stay just below the planet whatever its size (mutable, per frame). */
+export const xrGlobe = { pos: new THREE.Vector3().copy(XR_ANCHOR), scale: XR_BASE_SCALE, chartK: 0 };
+
+const _head = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _focal = new THREE.Vector3();
+const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+const _zero = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 
 export function CameraRig({ children }: { children: ReactNode }) {
   const group = useRef<THREE.Group>(null);
   const { camera } = useThree();
   const xrMode = useXR((s) => s.mode);
   const inXR = xrMode != null;
+  /* Smoothed head direction + chart-shrink blend, kept out of React. */
+  const xr = useRef({ dir: new THREE.Vector3(0.3, 0.1, 0.95).normalize(), chartK: 0 });
 
   const view = useWorld((s) => s.view);
   const focusedRegion = useWorld((s) => s.focusedRegion);
@@ -101,10 +132,30 @@ export function CameraRig({ children }: { children: ReactNode }) {
     g.rotateOnWorldAxis(X_AXIS, rig.pitch);
 
     if (inXR) {
-      /* Zoom by scaling the world toward the user; keep it comfortably sized. */
-      const s = XR_BASE_SCALE * Math.pow(DIST.world / rig.dist, 0.62);
+      const x = xr.current;
+      /* 0 at the world view → 1 once zoomed to a country (or closer). */
+      const zoomT = easeInOut(clamp((DIST.world - rig.dist) / (DIST.world - DIST.country), 0, 1));
+      /* Shrink while the cluster shows a chart or a confirmation card. */
+      const w = useWorld.getState(), m = useMarket.getState();
+      const chartShowing = Boolean((w.focusedCompany && w.panelReady) || m.pendingTrade || m.pendingOrder);
+      x.chartK = damp(x.chartK, chartShowing ? 1 : 0, 3.2, dt);
+      _focal.lerpVectors(XR_FOCAL_WORLD, XR_FOCAL_NEAR, zoomT).lerp(XR_FOCAL_CHART, x.chartK);
+      const s = THREE.MathUtils.lerp(THREE.MathUtils.lerp(XR_BASE_SCALE, XR_SCALE_NEAR, zoomT), XR_SCALE_CHART, x.chartK);
+
+      /* The headset camera is the head: turn the focused spot toward it. */
+      camera.getWorldPosition(_head);
+      if (!Number.isFinite(_head.x) || _head.lengthSq() < 1e-6) _head.copy(XR_HEAD_FALLBACK);
+      _dir.subVectors(_head, _focal).normalize();
+      x.dir.x = damp(x.dir.x, _dir.x, 3, dt); x.dir.y = damp(x.dir.y, _dir.y, 3, dt); x.dir.z = damp(x.dir.z, _dir.z, 3, dt);
+      x.dir.normalize();
+      _m.lookAt(x.dir, _zero, _up);
+      _q.setFromRotationMatrix(_m);
+      g.quaternion.premultiply(_q);
+
+      /* Centre = focal point pulled back one radius along the head direction. */
       g.scale.setScalar(s);
-      g.position.set(XR_ANCHOR.x, XR_ANCHOR.y - (s - XR_BASE_SCALE) * 0.25, XR_ANCHOR.z + (s - XR_BASE_SCALE) * 0.35);
+      g.position.copy(_focal).addScaledVector(x.dir, -s);
+      xrGlobe.pos.copy(g.position); xrGlobe.scale = s; xrGlobe.chartK = x.chartK;
     } else {
       g.scale.setScalar(1);
       g.position.set(0, 0, 0);

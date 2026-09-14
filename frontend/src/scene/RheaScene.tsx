@@ -14,12 +14,14 @@ import { CompanyMarkers } from "./CompanyMarkers";
 import { Connections } from "./Connections";
 import { CountryPins } from "./CountryPins";
 import { Globe, Stars } from "./Globe";
+import { RheaController } from "./XRController";
 import { XRPanels } from "./XRPanels";
 
 /* One XR store for the app. Hands + controllers; passthrough via immersive-ar. */
 export const xrStore = createXRStore({
   hand: true,
-  controller: true,
+  /* Stock controller model + pointers, with "hold A to speak" tags on the right hand. */
+  controller: RheaController,
   frameBufferScaling: "high",
   foveation: 0.6,
   anchors: false,

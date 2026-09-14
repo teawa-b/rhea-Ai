@@ -10,7 +10,7 @@
 import { Text } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useXR, useXRInputSourceState } from "@react-three/xr";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import type { ChartRange } from "@shared/types";
@@ -18,26 +18,34 @@ import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
-import { confirmTrade, confirmTrigger, describeRule, prepareTrade, prepareTrigger } from "@/solana/trade";
+import { confirmTrade, confirmTrigger, describeIntent, describeRule, isGated, prepareTrade, prepareTrigger } from "@/solana/trade";
+import { xrGlobe } from "./CameraRig";
 import { C, fmtPct, fmtUsd } from "@/theme";
 import { drawChart } from "@/ui/chartDraw";
 
 /* Chart cluster: eye level, right of the globe, turned slightly toward the user. */
 const CLUSTER_POS: [number, number, number] = [0.6, 1.5, -1.3];
 const CLUSTER_ROT: [number, number, number] = [0, -0.34, 0];
-const CAPTION_POS: [number, number, number] = [-0.5, 0.82, -1.45];
+/* Captions + voice orb hang just under the globe and follow it as it grows,
+ * shrinks and moves (see xrGlobe in CameraRig). */
+const CAPTION_GAP = 0.09;
 const RANGES: ChartRange[] = ["1D", "5D", "1M", "1Y"];
 
 const OUTLINE = { outlineWidth: 0.0035, outlineColor: "#05060d", outlineOpacity: 0.9 } as const;
 
 /** Pill button: thin luminous border, faint fill, haloed label. */
-function Pill({ position, label, accent = C.cyan, w = 0.2, onClick, disabled, active }: { position: [number, number, number]; label: string; accent?: string; w?: number; onClick: () => void; disabled?: boolean; active?: boolean }) {
+function Pill({ position, label, accent = C.cyan, w = 0.2, onClick, onHoldStart, onHoldEnd, disabled, active }: { position: [number, number, number]; label: string; accent?: string; w?: number; onClick?: () => void; /** press-and-hold (pinch or trigger held) */ onHoldStart?: () => void; onHoldEnd?: () => void; disabled?: boolean; active?: boolean }) {
   const [hover, setHover] = useState(false);
   const stop = (e: ThreeEvent<PointerEvent | MouseEvent>) => e.stopPropagation();
   const edges = useMemo(() => new THREE.EdgesGeometry(new THREE.PlaneGeometry(w, 0.066)), [w]);
   return (
     <group position={position}>
-      <mesh onClick={(e) => { stop(e); if (!disabled) onClick(); }} onPointerOver={(e) => { stop(e); setHover(true); }} onPointerOut={() => setHover(false)}>
+      <mesh
+        onClick={(e) => { stop(e); if (!disabled) onClick?.(); }}
+        onPointerDown={onHoldStart ? (e) => { stop(e); if (!disabled) onHoldStart(); } : undefined}
+        onPointerUp={onHoldEnd ? (e) => { stop(e); onHoldEnd(); } : undefined}
+        onPointerOver={(e) => { stop(e); setHover(true); }}
+        onPointerOut={() => { setHover(false); onHoldEnd?.(); }}>
         <planeGeometry args={[w, 0.066]} />
         <meshBasicMaterial color={active ? accent : "#0b0f1c"} transparent opacity={disabled ? 0.25 : active ? 0.55 : hover ? 0.75 : 0.55} toneMapped={false} depthWrite={false} />
       </mesh>
@@ -104,16 +112,16 @@ function CompanyHolo({ companyId }: { companyId: string }) {
   const range = useWorld((s) => s.chartRange);
   const setChartRange = useWorld((s) => s.setChartRange);
   const voiceState = useVoice((s) => s.state);
-  const muted = useVoice((s) => s.muted);
-  const connect = useVoice((s) => s.connect);
-  const toggleMute = useVoice((s) => s.toggleMute);
+  const holding = useVoice((s) => s.holding);
+  const setHold = useVoice((s) => s.setHold);
   useEffect(() => { void loadDetail(companyId, true); const h = setInterval(() => void loadDetail(companyId, true), 10_000); return () => clearInterval(h); }, [companyId, loadDetail]);
 
   const p = detail?.price;
   const pos = portfolio?.positions.find((x) => x.companyId === companyId);
   const active = orders.filter((o) => o.companyId === companyId && o.status === "active");
   const ch = p?.change24hPct ?? null;
-  const canTrade = auth.authenticated && (detail?.asset?.tradable ?? false);
+  /* Signed-out users may still press Buy: prepareTrade opens the sign-in card. */
+  const canTrade = detail?.asset?.tradable ?? false;
   const items = (news?.items ?? []).filter((n) => n.companyIds.includes(companyId)).slice(0, 2);
   const W = 1.04, H = 0.5;
   const triggerPrice = p?.tokenPriceUsd ? Math.round(p.tokenPriceUsd * 0.9) : 0;
@@ -130,7 +138,7 @@ function CompanyHolo({ companyId }: { companyId: string }) {
       <group position={[0, 0.06, 0]}><ChartPlane companyId={companyId} w={W} h={H} /></group>
 
       {/* Stats line under the chart */}
-      <Label position={[-W / 2, -0.23, 0]} text={pos ? `Position ${pos.amountUi.toFixed(4)} ${pos.symbol} · ${fmtUsd(pos.valueUsd)}` : auth.authenticated ? "No position" : "Sign in on desktop to trade"} size={0.02} color="#dfe9f5" />
+      <Label position={[-W / 2, -0.23, 0]} text={pos ? `Position ${pos.amountUi.toFixed(4)} ${pos.symbol} · ${fmtUsd(pos.valueUsd)}` : auth.authenticated ? "No position" : "Not signed in · Buy opens sign-in"} size={0.02} color="#dfe9f5" />
       {active[0] ? <Label position={[-W / 2, -0.265, 0]} text={`◉ AGENT WATCHING · ${describeRule(active[0])}`} size={0.02} color={C.gold} /> : null}
       {impact && impact.companyId === companyId ? (
         <Label position={[-W / 2, -0.302, 0]} text={`${impact.impact.replace("_", " ").toUpperCase()} · ${(impact.confidence * 100).toFixed(0)}% · ${impact.event}`} size={0.019} color={impact.impact === "potentially_negative" ? C.magenta : impact.impact === "potentially_positive" ? C.solGreen : C.amber} maxWidth={W} />
@@ -139,9 +147,9 @@ function CompanyHolo({ companyId }: { companyId: string }) {
 
       {/* Assistant buttons floating beneath */}
       <group position={[0, -0.46, 0.01]}>
-        <Pill position={[-0.36, 0, 0]} w={0.2} label={voiceState === "off" || voiceState === "error" ? "● Talk" : muted ? "Unmute" : "● Listening"} accent={voiceState === "listening" ? C.violet : C.sol} active={voiceState !== "off" && !muted} onClick={() => { if (voiceState === "off" || voiceState === "error") void connect(auth); else toggleMute(); }} />
-        <Pill position={[-0.135, 0, 0]} w={0.2} label="Buy $100" accent={C.solGreen} disabled={!canTrade} onClick={() => void prepareTrade(auth, companyId, "buy", 100).then((r) => { if (!r.ok) setError(r.error); })} />
-        <Pill position={[0.09, 0, 0]} w={0.2} label="Sell all" accent={C.magenta} disabled={!canTrade || !pos} onClick={() => pos && void prepareTrade(auth, companyId, "sell", pos.amountUi).then((r) => { if (!r.ok) setError(r.error); })} />
+        <Pill position={[-0.36, 0, 0]} w={0.2} label={holding ? "● Listening" : voiceState === "connecting" ? "Connecting" : "Hold · Talk"} accent={holding ? C.violet : C.sol} active={holding} onHoldStart={() => setHold(true, auth)} onHoldEnd={() => setHold(false)} />
+        <Pill position={[-0.135, 0, 0]} w={0.2} label="Buy $100" accent={C.solGreen} disabled={!canTrade} onClick={() => void prepareTrade(auth, companyId, "buy", 100).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
+        <Pill position={[0.09, 0, 0]} w={0.2} label="Sell all" accent={C.magenta} disabled={!canTrade || !pos} onClick={() => pos && void prepareTrade(auth, companyId, "sell", pos.amountUi).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
         <Pill position={[0.315, 0, 0]} w={0.2} label={triggerPrice ? `Buy ≤ $${triggerPrice}` : "Trigger"} accent={C.amber} disabled={!canTrade || !triggerPrice} onClick={() => void prepareTrigger(auth, companyId, "buy_below", triggerPrice, 100).then((r) => { if (!r.ok) setError(r.error); })} />
       </group>
       <group position={[0, -0.545, 0.01]}>
@@ -260,63 +268,136 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
   );
 }
 
+/* ---------------- Sign-in / funding gates (in-headset) ----------------
+ * Privy's login is a DOM modal, which an immersive session hides, so the
+ * sign-in card ends the session first: the user signs in on the flat page and
+ * re-enters Mixed Reality signed in (the login persists in the browser). */
+
+function LoginHolo() {
+  const auth = useAuth();
+  const session = useXR((s) => s.session);
+  const prompt = useMarket((s) => s.loginPrompt);
+  const setPrompt = useMarket((s) => s.setLoginPrompt);
+  if (!prompt) return null;
+  return (
+    <group>
+      <Card w={0.84} h={0.5} accent={C.cyan} />
+      <Label position={[-0.38, 0.19, 0.001]} text="SIGN IN TO TRADE" size={0.04} color="#ffffff" />
+      <Label position={[-0.38, 0.145, 0.001]} text={prompt.reason} size={0.02} color="#b8c7da" maxWidth={0.76} />
+      <Label position={[-0.38, 0.07, 0.001]} text="Google, email or a Solana wallet — new accounts get an embedded Solana wallet in seconds." size={0.02} color="#dfe9f5" maxWidth={0.76} />
+      <Label position={[-0.38, -0.01, 0.001]} text={`Sign-in happens on the flat page: press Sign in to leave the headset view, sign in, then press Enter Mixed Reality again.${prompt.resume ? ` Your request to ${describeIntent(prompt.resume)} continues automatically.` : ""}`} size={0.019} color="#b8c7da" maxWidth={0.76} />
+      <Pill position={[-0.19, -0.17, 0.002]} w={0.24} label="Later" accent={C.frost} onClick={() => setPrompt(null)} />
+      <Pill position={[0.19, -0.17, 0.002]} w={0.24} label="Sign in" accent={C.cyan} onClick={() => { void (session ? session.end().catch(() => undefined) : Promise.resolve()).then(() => setTimeout(() => auth.login(), 400)); }} />
+    </group>
+  );
+}
+
+function DepositHolo() {
+  const auth = useAuth();
+  const prompt = useMarket((s) => s.depositPrompt);
+  const setPrompt = useMarket((s) => s.setDepositPrompt);
+  const portfolio = useMarket((s) => s.portfolio);
+  const loadPortfolio = useMarket((s) => s.loadPortfolio);
+  if (!prompt) return null;
+  const have = portfolio?.usdcBalance ?? prompt.haveUsd;
+  const addr = auth.address ?? "—";
+  return (
+    <group>
+      <Card w={0.84} h={0.56} accent={C.solGreen} />
+      <Label position={[-0.38, 0.22, 0.001]} text="FUND YOUR WALLET" size={0.04} color="#ffffff" />
+      <Label position={[-0.38, 0.175, 0.001]} text={`USDC on Solana · ${fmtUsd(Math.max(0, prompt.neededUsd - have))} more needed`} size={0.02} color="#b8c7da" />
+      <Row y={0.11} label="Wallet USDC" value={fmtUsd(have)} />
+      <Row y={0.065} label="This trade needs" value={fmtUsd(prompt.neededUsd)} />
+      <Label position={[-0.38, 0.005, 0.001]} text="SEND USDC (SOLANA) TO" size={0.017} color="#b8c7da" />
+      <Label position={[-0.38, -0.03, 0.001]} text={addr.slice(0, 22)} size={0.024} color={C.solGreen} />
+      <Label position={[-0.38, -0.062, 0.001]} text={addr.slice(22)} size={0.024} color={C.solGreen} />
+      <Label position={[-0.38, -0.115, 0.001]} text={`Solana network only; keep ~0.01 SOL for fees. Copy the address from the desktop panel.${prompt.resume ? " The trade continues when the USDC lands." : ""}`} size={0.018} color="#b8c7da" maxWidth={0.76} />
+      <Pill position={[-0.19, -0.2, 0.002]} w={0.24} label="Later" accent={C.frost} onClick={() => setPrompt(null)} />
+      <Pill position={[0.19, -0.2, 0.002]} w={0.24} label="I've sent it" accent={C.solGreen} onClick={() => void loadPortfolio()} />
+    </group>
+  );
+}
+
+/** Follows the globe: just under it, in front of its lower half. */
+function useUnderGlobe(ref: RefObject<THREE.Group | null>, dy = 0) {
+  useFrame(() => {
+    const g = ref.current;
+    if (!g) return;
+    const { pos, scale } = xrGlobe;
+    g.position.set(pos.x + 0.12, pos.y - scale - CAPTION_GAP + dy, pos.z + scale * 0.55);
+  });
+}
+
 /** Floating captions + status under the globe. */
 function Captions() {
   const captions = useVoice((s) => s.captions);
   const state = useVoice((s) => s.state);
+  const holding = useVoice((s) => s.holding);
+  const ref = useRef<THREE.Group>(null);
+  useUnderGlobe(ref);
   const last = captions.slice(-2);
+  const status = holding ? "LISTENING · RELEASE WHEN DONE"
+    : state === "connecting" ? "CONNECTING…"
+    : state === "speaking" ? "SPEAKING · HOLD  A  TO INTERRUPT"
+    : state === "thinking" ? "THINKING…"
+    : "HOLD  A  TO SPEAK";
   return (
-    <group position={CAPTION_POS}>
+    <group ref={ref}>
       {last.map((c, i) => (
         <Text key={c.id} position={[0, (last.length - 1 - i) * 0.085, 0]} fontSize={0.026} color={c.role === "user" ? "#e6dcff" : "#e8f4ff"} anchorX="center" anchorY="middle" maxWidth={1.1} textAlign="center" {...OUTLINE}>
           {`${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-200)}`}
         </Text>
       ))}
-      <Text position={[0, -0.085, 0]} fontSize={0.017} color={state === "speaking" ? C.solGreen : state === "thinking" ? C.amber : "#b8c7da"} anchorX="center" anchorY="middle" letterSpacing={0.2} {...OUTLINE}>
-        {state === "off" ? "PRESS A OR TAP ● TALK" : state.toUpperCase()}
+      <Text position={[0, -0.085, 0]} fontSize={0.017} color={holding ? C.violet : state === "speaking" ? C.solGreen : state === "thinking" ? C.amber : "#b8c7da"} anchorX="center" anchorY="middle" letterSpacing={0.2} {...OUTLINE}>
+        {status}
       </Text>
     </group>
   );
 }
 
-/** Voice orb floating under the globe: pinch / click to connect or mute. */
+/** Voice orb under the captions: pinch-and-hold to talk. */
 function VoiceOrb() {
   const state = useVoice((s) => s.state);
-  const connect = useVoice((s) => s.connect);
-  const toggleMute = useVoice((s) => s.toggleMute);
-  const muted = useVoice((s) => s.muted);
+  const holding = useVoice((s) => s.holding);
+  const setHold = useVoice((s) => s.setHold);
   const auth = useAuth();
   const ref = useRef<THREE.Mesh>(null);
+  const anchor = useRef<THREE.Group>(null);
+  useUnderGlobe(anchor, -0.16);
   useFrame((s) => {
     if (!ref.current) return;
     const t = s.clock.elapsedTime;
-    const k = state === "speaking" ? 1 + Math.sin(t * 12) * 0.12 : state === "listening" ? 1.08 : 1 + Math.sin(t * 2) * 0.04;
+    const k = state === "speaking" ? 1 + Math.sin(t * 12) * 0.12 : holding ? 1.15 : 1 + Math.sin(t * 2) * 0.04;
     ref.current.scale.setScalar(k);
-    (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity = state === "speaking" ? 2.2 : state === "thinking" ? 1.4 : muted ? 0.3 : 0.9;
+    (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity = state === "speaking" ? 2.2 : state === "thinking" ? 1.4 : holding ? 2 : 0.6;
   });
-  const color = state === "listening" ? C.violet : state === "thinking" ? C.amber : state === "error" ? C.red : state === "off" ? C.steel : C.sol;
+  const color = holding ? C.violet : state === "thinking" ? C.amber : state === "error" ? C.red : state === "off" ? C.steel : C.sol;
   return (
-    <mesh ref={ref} position={[CAPTION_POS[0], CAPTION_POS[1] - 0.16, CAPTION_POS[2]]} onClick={(e) => { e.stopPropagation(); if (state === "off" || state === "error") void connect(auth); else toggleMute(); }}>
-      <sphereGeometry args={[0.04, 24, 18]} />
-      <meshStandardMaterial color={new THREE.Color(color).multiplyScalar(0.3)} emissive={color} emissiveIntensity={1} roughness={0.3} />
-    </mesh>
+    <group ref={anchor}>
+      <mesh ref={ref} onPointerDown={(e) => { e.stopPropagation(); setHold(true, auth); }} onPointerUp={(e) => { e.stopPropagation(); setHold(false); }} onPointerOut={() => setHold(false)}>
+        <sphereGeometry args={[0.04, 24, 18]} />
+        <meshStandardMaterial color={new THREE.Color(color).multiplyScalar(0.3)} emissive={color} emissiveIntensity={1} roughness={0.3} />
+      </mesh>
+    </group>
   );
 }
 
-/* Right controller: A (index 4) toggles mute / connects, B (index 5) returns to
- * the world view. Edge-detected so a held button fires once. */
+/* Right controller: hold A to speak (the mic opens while held and Rhea is
+ * ducked, so she can be interrupted); B returns to the world view. B is
+ * edge-detected so a held button fires once. Reads the mapped "a-button"
+ * component when the profile provides it, else the xr-standard index
+ * (4 = A/X, 5 = B/Y). */
 function XRButtons() {
   const right = useXRInputSourceState("controller", "right");
   const was = useRef<{ a: boolean; b: boolean }>({ a: false, b: false });
   const auth = useAuth();
   useFrame(() => {
+    const gp = right?.gamepad;
     const buttons = right?.inputSource?.gamepad?.buttons;
-    if (!buttons) return;
-    const a = Boolean(buttons[4]?.pressed), b = Boolean(buttons[5]?.pressed);
-    if (a && !was.current.a) {
-      const v = useVoice.getState();
-      if (v.state === "off" || v.state === "error") void v.connect(auth); else v.toggleMute();
-    }
+    if (!gp && !buttons) return;
+    const a = gp?.["a-button"] ? gp["a-button"].state === "pressed" : Boolean(buttons?.[4]?.pressed);
+    const b = gp?.["b-button"] ? gp["b-button"].state === "pressed" : Boolean(buttons?.[5]?.pressed);
+    if (a !== was.current.a) useVoice.getState().setHold(a, auth);
     if (b && !was.current.b) useWorld.getState().resetGlobe(false);
     was.current = { a, b };
   });
@@ -341,11 +422,13 @@ export function XRPanels() {
   const focusedCountry = useWorld((s) => s.focusedCountry);
   const pendingTrade = useMarket((s) => s.pendingTrade);
   const pendingOrder = useMarket((s) => s.pendingOrder);
+  const loginPrompt = useMarket((s) => s.loginPrompt);
+  const depositPrompt = useMarket((s) => s.depositPrompt);
   if (mode == null) return null;
   return (
     <group>
       <group position={CLUSTER_POS} rotation={CLUSTER_ROT}>
-        {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
+        {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : depositPrompt ? <DepositHolo /> : loginPrompt ? <LoginHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
       </group>
       <Captions />
       <VoiceOrb />
