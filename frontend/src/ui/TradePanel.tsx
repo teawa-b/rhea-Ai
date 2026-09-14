@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { COMPANY_BY_ID } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
+import { openSignInTab } from "@/auth/signinTab";
 import { useVoice } from "@/ai/voice";
 import { useMarket } from "@/state/market";
 import { confirmTrade, confirmTrigger, describeIntent, describeRule } from "@/solana/trade";
@@ -141,12 +142,12 @@ export function LoginPanel() {
       </div>
       <div className="panel-body">
         <p className="hint" style={{ margin: "0 0 12px", fontSize: 12.5, color: "#dfe9f5" }}>
-          Sign in with Google, email or a Solana wallet. New accounts get an embedded Solana wallet in seconds — Rhea never holds your keys.
+          Sign in with Google, email or a Solana wallet in a new tab, then come back here. New accounts get an embedded Solana wallet in seconds — Rhea never holds your keys.
           {prompt.resume ? ` Your ${describeIntent(prompt.resume)} will continue right after.` : ""}
         </p>
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn ghost" onClick={() => setPrompt(null)}>Later</button>
-          <button className="btn primary" onClick={auth.login} disabled={!auth.ready}>{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in"}</button>
+          <button className="btn primary" onClick={() => { if (auth.mode === "guest") auth.login(); else openSignInTab(auth); }} disabled={!auth.ready} title="Opens sign-in in a new tab">{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in ↗"}</button>
         </div>
       </div>
     </div>

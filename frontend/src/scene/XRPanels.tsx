@@ -15,6 +15,7 @@ import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import type { ChartRange } from "@shared/types";
 import { useAuth } from "@/auth/Auth";
+import { signInUrl } from "@/auth/signinTab";
 import { useVoice } from "@/ai/voice";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
@@ -122,7 +123,9 @@ function CompanyHolo({ companyId }: { companyId: string }) {
   const ch = p?.change24hPct ?? null;
   /* Signed-out users may still press Buy: prepareTrade opens the sign-in card. */
   const canTrade = detail?.asset?.tradable ?? false;
-  const items = (news?.items ?? []).filter((n) => n.companyIds.includes(companyId)).slice(0, 2);
+  /* Company headlines, else the country briefing that led here. */
+  const own = (news?.items ?? []).filter((n) => n.companyIds.includes(companyId));
+  const items = (own.length ? own : (news?.items ?? []).filter((n) => n.countryCodes.includes(co.countryCode))).slice(0, 2);
   const W = 1.04, H = 0.5;
   const triggerPrice = p?.tokenPriceUsd ? Math.round(p.tokenPriceUsd * 0.9) : 0;
 
@@ -248,7 +251,10 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
   const prices = useMarket((s) => s.prices);
   const cs = overview?.countries.find((c) => c.code === code);
   const ids = (cs?.companies ?? []).filter((id) => (prices[id]?.tokenPriceUsd ?? 0) > 0).slice(0, 8);
-  const top = 0.05 + ids.length * 0.025;
+  const news = useWorld((s) => s.news);
+  const headlines = news && (news.target === cd.name || news.items.some((n) => n.countryCodes.includes(code))) ? news.items.slice(0, 3) : [];
+  const top = 0.05 + ids.length * 0.025 + headlines.length * 0.024;
+  const listEnd = top - 0.03 - ids.length * 0.052;
   return (
     <group>
       <Label position={[-0.4, top + 0.09, 0]} text={cd.name.toUpperCase()} size={0.046} color="#ffffff" />
@@ -263,7 +269,9 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
           </group>
         );
       })}
-      <Pill position={[0, top - 0.06 - ids.length * 0.052, 0.01]} w={0.22} label="◂ World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
+      {headlines.length ? <Label position={[-0.4, listEnd - 0.01, 0]} text={`NEWS · ${cd.name.toUpperCase()}`} size={0.017} color={C.frost} /> : null}
+      {headlines.map((n, i) => <Label key={n.id} position={[-0.4, listEnd - 0.05 - i * 0.042, 0]} text={`▸ ${n.title} — ${n.source}`} size={0.018} color="#c7d7ea" maxWidth={0.8} />)}
+      <Pill position={[0, listEnd - (headlines.length ? 0.09 + headlines.length * 0.042 : 0.03), 0.01]} w={0.22} label="◂ World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
     </group>
   );
 }
@@ -285,9 +293,16 @@ function LoginHolo() {
       <Label position={[-0.38, 0.19, 0.001]} text="SIGN IN TO TRADE" size={0.04} color="#ffffff" />
       <Label position={[-0.38, 0.145, 0.001]} text={prompt.reason} size={0.02} color="#b8c7da" maxWidth={0.76} />
       <Label position={[-0.38, 0.07, 0.001]} text="Google, email or a Solana wallet — new accounts get an embedded Solana wallet in seconds." size={0.02} color="#dfe9f5" maxWidth={0.76} />
-      <Label position={[-0.38, -0.01, 0.001]} text={`Sign-in happens on the flat page: press Sign in to leave the headset view, sign in, then press Enter Mixed Reality again.${prompt.resume ? ` Your request to ${describeIntent(prompt.resume)} continues automatically.` : ""}`} size={0.019} color="#b8c7da" maxWidth={0.76} />
+      <Label position={[-0.38, -0.01, 0.001]} text={`Sign in opens a new browser tab: sign in there, come back to this tab, then press Enter Mixed Reality again.${prompt.resume ? ` Your request to ${describeIntent(prompt.resume)} continues automatically.` : ""}`} size={0.019} color="#b8c7da" maxWidth={0.76} />
       <Pill position={[-0.19, -0.17, 0.002]} w={0.24} label="Later" accent={C.frost} onClick={() => setPrompt(null)} />
-      <Pill position={[0.19, -0.17, 0.002]} w={0.24} label="Sign in" accent={C.cyan} onClick={() => { void (session ? session.end().catch(() => undefined) : Promise.resolve()).then(() => setTimeout(() => auth.login(), 400)); }} />
+      <Pill position={[0.19, -0.17, 0.002]} w={0.24} label="Sign in ↗" accent={C.cyan} onClick={() => {
+        /* Try the tab straight from the press; if the browser blocks it outside
+         * a DOM gesture, the flat page's sign-in panel (shown once the session
+         * ends) has a button that opens it. */
+        const tab = auth.mode === "privy" ? window.open(signInUrl(), "rhea-signin") : null;
+        void session?.end().catch(() => undefined);
+        if (tab) tab.focus?.();
+      }} />
     </group>
   );
 }

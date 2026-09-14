@@ -59,7 +59,10 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const tradable = detail?.asset?.tradable ?? false;
   /* Signed-out users may still press Buy: prepareTrade opens the sign-in panel. */
   const canTrade = tradable;
-  const companyNews = news && (news.target === co.name || news.items.some((n) => n.companyIds.includes(co.id))) ? news.items : [];
+  /* Company news when there is some; otherwise keep the country briefing that led here visible. */
+  const ownNews = news && (news.target === co.name || news.items.some((n) => n.companyIds.includes(co.id)));
+  const countryNews = news && !ownNews && (news.target === COUNTRIES[co.countryCode].name || news.items.some((n) => n.countryCodes.includes(co.countryCode)));
+  const companyNews = ownNews || countryNews ? news!.items : [];
 
   const doBuy = async () => {
     setBusy("buy");
@@ -192,7 +195,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
 
         {/* News + impact */}
         {impact && impact.companyId === co.id ? (<><div className="divider" /><ImpactCard impact={impact} /></>) : null}
-        {companyNews.length ? (<><div className="divider" /><div className="hint" style={{ marginBottom: 6 }}>NEWS · sources</div><NewsCards items={companyNews} /></>) : null}
+        {companyNews.length ? (<><div className="divider" /><div className="hint" style={{ marginBottom: 6 }}>{countryNews ? `NEWS · ${COUNTRIES[co.countryCode].name}` : "NEWS · sources"}</div><NewsCards items={companyNews} /></>) : null}
       </div>
     </div>
   );

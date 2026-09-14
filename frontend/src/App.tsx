@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useStore } from "zustand";
 import { RheaAuthProvider, useAuth } from "@/auth/Auth";
+import { useSignInTabSync } from "@/auth/signinTab";
 import { useVoice, wireContextUpdates } from "@/ai/voice";
 import { analyticsSummary, track, wireAnalytics } from "@/analytics";
 import { RheaScene, enterImmersive, xrStore } from "@/scene/RheaScene";
@@ -38,6 +39,7 @@ function IntentResumer() {
   const depositPrompt = useMarket((s) => s.depositPrompt);
   const portfolio = useMarket((s) => s.portfolio);
   const firstName = auth.displayName && !auth.displayName.includes("…") ? auth.displayName.split(" ")[0] : null;
+  useSignInTabSync(auth);
 
   useEffect(() => {
     if (!auth.authenticated || !auth.address || !loginPrompt) return;
