@@ -48,4 +48,6 @@ export const api = {
   trigger: (step: "challenge" | "verify" | "vault" | "deposit" | "order" | "cancel" | "history", body: unknown, jwt?: string) =>
     j<Record<string, unknown>>(`/api/market/trigger/${step}`, { method: "POST", body: JSON.stringify(body ?? {}), headers: jwt ? { "x-trigger-jwt": jwt } : {} }),
   streetViewUrl: (id: string) => apiUrl(`/api/market/streetview/${encodeURIComponent(id)}`),
+  /** Company logo re-served with CORS so WebGL can texture it. */
+  logoUrl: (id: string) => apiUrl(`/api/market/logo/${encodeURIComponent(id)}`),
 };
