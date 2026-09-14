@@ -6,6 +6,7 @@ import { REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
 import { fmtPct, fmtUsd } from "@/theme";
 import { CloseIcon } from "./icons";
+import { CoLogo } from "./CoLogo";
 
 export function RegionPanel({ id }: { id: string }) {
   const region = REGION_BY_ID[id];
@@ -43,6 +44,7 @@ export function RegionPanel({ id }: { id: string }) {
                 const co = COMPANY_BY_ID[cid]; const p = prices[cid]; const ch = p?.change24hPct ?? null;
                 return (
                   <div key={cid} className="item" onClick={() => focusCompany(cid)}>
+                    <CoLogo id={cid} />
                     <div className="grow"><div className="name">{co.name} <span className="muted">{co.ticker}</span></div><div className="meta">{co.sector}</div></div>
                     <div style={{ textAlign: "right" }}>
                       <div className="mono">{fmtUsd(p?.tokenPriceUsd)}</div>

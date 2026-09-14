@@ -10,6 +10,7 @@ import { isGated, prepareTrade, prepareTrigger, describeRule } from "@/solana/tr
 import { fmtAge, fmtPct, fmtUsd } from "@/theme";
 import { Chart } from "./Chart";
 import { CloseIcon } from "./icons";
+import { CoLogo } from "./CoLogo";
 import { NewsCards, ImpactCard } from "./NewsCards";
 
 export function CompanyPanel({ companyId }: { companyId: string }) {
@@ -87,9 +88,12 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   return (
     <div className="panel clickable">
       <div className="panel-head">
-        <div>
+        <div className="row" style={{ gap: 10, flexWrap: "nowrap", minWidth: 0 }}>
+          <CoLogo id={co.id} size={34} />
+          <div style={{ minWidth: 0 }}>
           <h2>{co.name}</h2>
           <div className="sub">{co.ticker} · {co.tokenSymbol} · {co.sector} · {COUNTRIES[co.countryCode].name}</div>
+          </div>
         </div>
         <button className="icon-btn" onClick={() => focusCountry(co.countryCode)} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
       </div>

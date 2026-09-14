@@ -7,6 +7,7 @@ import { useXR } from "@react-three/xr";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
+import { logoUrl } from "@/market/logos";
 import type { Company } from "@shared/types";
 import { C, fmtPct, fmtUsd } from "@/theme";
 import { useMarket } from "@/state/market";
@@ -141,6 +142,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
         <HoloLabel
           position={[0, height + (activeOrders.length ? 0.2 : 0.12), 0]}
           title={shortName}
+          icon={logoUrl(co.id)}
           subtitle={activeOrders.length ? `◉ AGENT WATCHING · ${sub}` : sub}
           accent={activeOrders.length ? C.amber : accent}
           scale={labelScale}

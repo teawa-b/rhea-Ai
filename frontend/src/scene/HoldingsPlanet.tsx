@@ -9,13 +9,14 @@ import { useXR } from "@react-three/xr";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID } from "@shared/registry";
+import { logoUrl } from "@/market/logos";
 import { C, fmtUsd } from "@/theme";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { HoloLabel } from "./HoloLabel";
 import { PLANET_POS, XR_PLANET_POS, XR_PLANET_SCALE, travel } from "./CameraRig";
 
-type Moon = { id: string; title: string; subtitle: string; color: string; size: number; onClick?: () => void };
+type Moon = { id: string; title: string; subtitle: string; color: string; size: number; icon?: string; onClick?: () => void };
 
 /* Horizontal Solana bands (purple → teal → green) with soft turbulence. */
 function useBandTexture() {
@@ -66,7 +67,7 @@ function OrbitingMoon({ moon, index, radius }: { moon: Moon; index: number; radi
             <sphereGeometry args={[moon.size, 16, 12]} />
             <meshBasicMaterial color={moon.color} transparent opacity={0.14} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
           </mesh>
-          <HoloLabel position={[0, moon.size + 0.34, 0]} title={moon.title} subtitle={moon.subtitle} accent={moon.color} scale={1.05} onClick={moon.onClick} />
+          <HoloLabel position={[0, moon.size + 0.34, 0]} title={moon.title} subtitle={moon.subtitle} accent={moon.color} scale={1.05} icon={moon.icon} onClick={moon.onClick} />
         </group>
       </group>
     </group>
@@ -119,6 +120,7 @@ export function HoldingsPlanet() {
         subtitle: `${p.amountUi.toFixed(p.amountUi < 1 ? 4 : 2)} ${p.symbol} · ${fmtUsd(p.valueUsd)}`,
         color: C.solGreen,
         size: sizeFor(p.valueUsd ?? 0),
+        icon: logoUrl(p.companyId),
         onClick: () => focusCompany(p.companyId),
       })),
     ];

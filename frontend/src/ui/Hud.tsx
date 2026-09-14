@@ -8,6 +8,7 @@ import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { fmtPct, fmtUsd } from "@/theme";
 import { CompanyPanel } from "./CompanyPanel";
+import { CoLogo } from "./CoLogo";
 import { CountryPanel } from "./CountryPanel";
 import { ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
@@ -208,6 +209,7 @@ export function Hud() {
                       const co = COMPANY_BY_ID[id]; const p = prices[id]; const ch = p?.change24hPct ?? null;
                       return (
                         <div key={id} className="item" onClick={() => focusCompany(id)}>
+                          <CoLogo id={id} />
                           <div className="grow"><div className="name">{co.name} <span className="muted">{co.ticker}</span></div><div className="meta">{co.sector} · {COUNTRIES[co.countryCode].name}</div></div>
                           <div style={{ textAlign: "right" }}><div className="mono">{fmtUsd(p?.tokenPriceUsd)}</div><div className={`mono ${ch == null ? "" : ch >= 0 ? "pos" : "neg"}`} style={{ fontSize: 11 }}>{fmtPct(ch)}</div><div className="hint">stock {fmtUsd(p?.underlyingPriceUsd)}</div></div>
                         </div>
@@ -286,6 +288,7 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
         <div className="list">
           {(portfolio?.positions ?? []).map((p) => (
             <div key={p.mint} className="item" onClick={() => focusCompany(p.companyId)}>
+              <CoLogo id={p.companyId} />
               <div className="grow"><div className="name">{COMPANY_BY_ID[p.companyId].name}</div><div className="meta">{p.amountUi.toFixed(4)} {p.symbol}</div></div>
               <div className="mono">{fmtUsd(p.valueUsd)}</div>
             </div>

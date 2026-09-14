@@ -353,3 +353,7 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
   .xr-cta { padding: 18px 24px 14px; }
   .xr-cta-text { font-size: 14px; letter-spacing: 0.18em; }
 }
+
+/* Company logo chips in panel lists */
+.co-logo { flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px rgba(63,224,255,0.25), 0 0 10px rgba(153,69,255,0.18); }
+.co-logo.mono-logo { display: grid; place-items: center; font-weight: 800; letter-spacing: 0.02em; color: #fff; background: linear-gradient(135deg, var(--sol), var(--cyan-deep)); }

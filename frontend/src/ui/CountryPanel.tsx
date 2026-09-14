@@ -6,6 +6,7 @@ import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { fmtPct, fmtUsd } from "@/theme";
 import { CloseIcon } from "./icons";
+import { CoLogo } from "./CoLogo";
 import { NewsCards } from "./NewsCards";
 
 export function CountryPanel({ code }: { code: CountryCode }) {
@@ -51,6 +52,7 @@ export function CountryPanel({ code }: { code: CountryCode }) {
             const ch = p?.change24hPct ?? null;
             return (
               <div key={id} className="item" onClick={() => focusCompany(id)}>
+                <CoLogo id={id} />
                 <div className="grow">
                   <div className="name">{co.name} <span className="muted">{co.ticker}</span></div>
                   <div className="meta">{co.sector}{co.headquarters ? ` · ${co.headquarters.name}` : ""}</div>
