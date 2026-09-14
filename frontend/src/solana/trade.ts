@@ -24,11 +24,10 @@ export async function prepareTrade(auth: RheaAuth, companyQuery: string, side: T
   if (!co) return { ok: false, error: `Unknown company "${companyQuery}"` };
   const m = useMarket.getState();
   if (!auth.authenticated || !auth.address) return { ok: false, error: "Sign in to trade — the app will open the login panel.", reasons: ["not_authenticated"] };
-  if (!m.jurisdiction) return { ok: false, error: "Choose your region in the top bar before trading.", reasons: ["no_jurisdiction"] };
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Amount must be positive." };
 
   try {
-    const { quote, asset } = await api.quote(co.id, side, amount, auth.address, m.jurisdiction);
+    const { quote, asset } = await api.quote(co.id, side, amount, auth.address);
     const intent: TradeIntent = {
       id: uid("trade"),
       userId: auth.address,
@@ -57,7 +56,7 @@ export async function confirmTrade(auth: RheaAuth, intent: TradeIntent): Promise
   /* Quotes go stale quickly; refresh if older than 45 s. */
   let quote = q;
   if (Date.now() - Date.parse(q.quotedAt) > 45_000 && auth.address) {
-    const fresh = await api.quote(intent.companyId, intent.side, intent.amount, auth.address, m.jurisdiction);
+    const fresh = await api.quote(intent.companyId, intent.side, intent.amount, auth.address);
     quote = fresh.quote;
   }
   const submitted: TradeIntent = { ...intent, quote, status: "submitted" };
@@ -88,8 +87,7 @@ export async function prepareTrigger(auth: RheaAuth, companyQuery: string, kind:
   if (!asset) return { ok: false, error: `${co.name} has no tokenized asset yet.` };
   const m = useMarket.getState();
   if (!auth.authenticated || !auth.address) return { ok: false, error: "Sign in to create orders — the app will open the login panel." };
-  if (!m.jurisdiction) return { ok: false, error: "Choose your region in the top bar first." };
-  const elig = await api.eligibility(co.id, m.jurisdiction, "trigger");
+  const elig = await api.eligibility(co.id, "trigger");
   if (!elig.result.allowed) return { ok: false, error: elig.result.reasons.join(" ") };
   if (!(triggerPriceUsd > 0) || !(amount > 0)) return { ok: false, error: "Price and amount must be positive." };
 

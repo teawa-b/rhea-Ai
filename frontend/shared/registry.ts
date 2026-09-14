@@ -329,15 +329,5 @@ export const XSTOCKS_DISCLOSURE_URL = "https://xstocks.com/";
 export const XSTOCKS_RESTRICTED_JURISDICTIONS = ["US", "CA", "GB"];
 export const XSTOCKS_MIN_TRADE_USD = 1;
 
-export const JURISDICTIONS: { code: string; name: string }[] = [
-  { code: "CH", name: "Switzerland" }, { code: "DE", name: "Germany" }, { code: "FR", name: "France" },
-  { code: "NL", name: "Netherlands" }, { code: "ES", name: "Spain" }, { code: "IT", name: "Italy" },
-  { code: "AE", name: "United Arab Emirates" }, { code: "SG", name: "Singapore" }, { code: "JP", name: "Japan" },
-  { code: "KR", name: "South Korea" }, { code: "BR", name: "Brazil" }, { code: "AR", name: "Argentina" },
-  { code: "MX", name: "Mexico" }, { code: "NG", name: "Nigeria" }, { code: "ZA", name: "South Africa" },
-  { code: "IN", name: "India" }, { code: "TR", name: "Türkiye" }, { code: "AU", name: "Australia" },
-  { code: "GB", name: "United Kingdom" }, { code: "CA", name: "Canada" }, { code: "US", name: "United States" },
-];
-
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";

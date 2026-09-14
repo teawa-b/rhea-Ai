@@ -98,7 +98,6 @@ function CompanyHolo({ companyId }: { companyId: string }) {
   const loadDetail = useMarket((s) => s.loadDetail);
   const portfolio = useMarket((s) => s.portfolio);
   const orders = useMarket((s) => s.orders);
-  const jurisdiction = useMarket((s) => s.jurisdiction);
   const setError = useMarket((s) => s.setError);
   const impact = useWorld((s) => s.impact);
   const news = useWorld((s) => s.news);
@@ -114,7 +113,7 @@ function CompanyHolo({ companyId }: { companyId: string }) {
   const pos = portfolio?.positions.find((x) => x.companyId === companyId);
   const active = orders.filter((o) => o.companyId === companyId && o.status === "active");
   const ch = p?.change24hPct ?? null;
-  const canTrade = auth.authenticated && !!jurisdiction && (detail?.asset?.tradable ?? false);
+  const canTrade = auth.authenticated && (detail?.asset?.tradable ?? false);
   const items = (news?.items ?? []).filter((n) => n.companyIds.includes(companyId)).slice(0, 2);
   const W = 1.04, H = 0.5;
   const triggerPrice = p?.tokenPriceUsd ? Math.round(p.tokenPriceUsd * 0.9) : 0;

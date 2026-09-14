@@ -41,6 +41,12 @@ export const RHEA_TOOLS: ToolDef[] = [
   },
   {
     type: "function",
+    name: "focus_region",
+    description: "Rotate and zoom the globe to a continent or market region, highlight its countries and open a region view of its tradable stocks. Use for questions like \"show me Europe\" or \"what's happening in Asia\"; use focus_country for a single country.",
+    parameters: obj({ region: { type: "string", description: "Europe, Asia, Greater China, North America or Oceania. Loosely matched." } }, ["region"]),
+  },
+  {
+    type: "function",
     name: "focus_company",
     description: "Fly the camera to a company's headquarters, open its holographic panel (prices, chart, news, position, orders). Call this before discussing a specific company.",
     parameters: obj({ company: companyParam }, ["company"]),

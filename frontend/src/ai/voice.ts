@@ -153,7 +153,6 @@ export function buildContext(auth: RheaAuth) {
   const m = useMarket.getState();
   const parts = [describeWorld()];
   parts.push(auth.authenticated ? `User signed in${auth.displayName ? ` as ${auth.displayName}` : ""}, wallet ${auth.address?.slice(0, 4)}…${auth.address?.slice(-4)}.` : "User not signed in (research only; trading needs sign-in).");
-  parts.push(m.jurisdiction ? `Jurisdiction: ${m.jurisdiction}.` : "Jurisdiction not selected.");
   if (m.portfolio) parts.push(`Portfolio: $${m.portfolio.totalValueUsd.toFixed(0)} total, ${m.portfolio.usdcBalance.toFixed(0)} USDC, positions: ${m.portfolio.positions.slice(0, 6).map((p) => `${p.amountUi.toFixed(3)} ${p.symbol}`).join(", ") || "none"}.`);
   const active = m.orders.filter((o) => o.status === "active");
   if (active.length) parts.push(`${active.length} active conditional order(s).`);
@@ -168,5 +167,5 @@ export function wireContextUpdates() {
   if (wired) return;
   wired = true;
   useWorld.subscribe((s, prev) => { if (s.contextVersion !== prev.contextVersion) useVoice.getState().pushContext(); });
-  useMarket.subscribe((s, prev) => { if (s.portfolio !== prev.portfolio || s.pendingTrade !== prev.pendingTrade || s.pendingOrder !== prev.pendingOrder || s.jurisdiction !== prev.jurisdiction) useVoice.getState().pushContext(); });
+  useMarket.subscribe((s, prev) => { if (s.portfolio !== prev.portfolio || s.pendingTrade !== prev.pendingTrade || s.pendingOrder !== prev.pendingOrder) useVoice.getState().pushContext(); });
 }

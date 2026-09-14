@@ -10,6 +10,7 @@ import { useXR } from "@react-three/xr";
 import { useEffect, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
+import { REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
 import { clamp, damp } from "./geo";
 import { DIST, endFlight, flyTo, releaseToWorld, rig, stepFlight } from "./rig";
@@ -31,6 +32,7 @@ export function CameraRig({ children }: { children: ReactNode }) {
   const inXR = xrMode != null;
 
   const view = useWorld((s) => s.view);
+  const focusedRegion = useWorld((s) => s.focusedRegion);
   const focusedCountry = useWorld((s) => s.focusedCountry);
   const focusedCompany = useWorld((s) => s.focusedCompany);
   const comparison = useWorld((s) => s.comparison);
@@ -43,7 +45,9 @@ export function CameraRig({ children }: { children: ReactNode }) {
       ? { place: COMPANY_BY_ID[focusedCompany].headquarters ?? COUNTRIES[COMPANY_BY_ID[focusedCompany].countryCode], dist: DIST.company, offset: -0.62 }
       : view === "country" && focusedCountry
         ? { place: COUNTRIES[focusedCountry], dist: DIST.country, offset: -0.45 }
-        : null;
+        : view === "region" && focusedRegion && REGION_BY_ID[focusedRegion]
+          ? { place: REGION_BY_ID[focusedRegion], dist: DIST.region, offset: -0.4 }
+          : null;
     if (target) {
       let stale = false;
       flyTo(target.place.lat, target.place.lng, target.dist, target.offset, () => { if (!stale) useWorld.getState().revealPanel(); });
@@ -56,7 +60,7 @@ export function CameraRig({ children }: { children: ReactNode }) {
     } else {
       releaseToWorld();
     }
-  }, [view, focusedCountry, focusedCompany, comparison]);
+  }, [view, focusedRegion, focusedCountry, focusedCompany, comparison]);
 
   useFrame((_, rawDt) => {
     const dt = Math.min(0.05, rawDt);

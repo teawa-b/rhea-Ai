@@ -1,7 +1,7 @@
 /* Desktop / mobile HUD over the globe. In immersive XR the DOM is hidden and
  * XRPanels renders the equivalent in-world. */
 import { useEffect, useRef, useState } from "react";
-import { COMPANY_BY_ID, COUNTRIES, JURISDICTIONS } from "@shared/registry";
+import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
 import { enterImmersive } from "@/scene/RheaScene";
@@ -12,6 +12,8 @@ import { CompanyPanel } from "./CompanyPanel";
 import { CountryPanel } from "./CountryPanel";
 import { ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
+import { RegionPanel } from "./RegionPanel";
+import { REGION_BY_ID } from "@/state/regions";
 import { OrderPanel, TradePanel } from "./TradePanel";
 
 function SolanaMark() {
@@ -42,8 +44,6 @@ export function Hud() {
   const status = useMarket((s) => s.status);
   const overview = useMarket((s) => s.overview);
   const portfolio = useMarket((s) => s.portfolio);
-  const jurisdiction = useMarket((s) => s.jurisdiction);
-  const setJurisdiction = useMarket((s) => s.setJurisdiction);
   const lastError = useMarket((s) => s.lastError);
   const setError = useMarket((s) => s.setError);
   const pendingTrade = useMarket((s) => s.pendingTrade);
@@ -51,6 +51,7 @@ export function Hud() {
   const prices = useMarket((s) => s.prices);
 
   const view = useWorld((s) => s.view);
+  const focusedRegion = useWorld((s) => s.focusedRegion);
   const focusedCountry = useWorld((s) => s.focusedCountry);
   const focusedCompany = useWorld((s) => s.focusedCompany);
   const comparison = useWorld((s) => s.comparison);
@@ -117,8 +118,8 @@ export function Hud() {
     : "Full-duplex · interrupt any time";
 
   /* A focused place's panel waits until the camera has arrived (panelReady). */
-  const placePanel = panelReady && (focusedCompany || focusedCountry);
-  const showPanel = pendingTrade || pendingOrder || placePanel || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry) || Object.keys(countryHeat).length > 0;
+  const placePanel = panelReady && (focusedCompany || focusedCountry || focusedRegion);
+  const showPanel = pendingTrade || pendingOrder || placePanel || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
   const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
 
@@ -141,10 +142,6 @@ export function Hud() {
             ) : "loading market…"}
           </span>
           {status && !status.openai ? <span className="chip dim" title="Set OPENAI_API_KEY on the server"><i className="dot err" />voice offline</span> : null}
-          <select className="chip clickable" value={jurisdiction ?? ""} onChange={(e) => setJurisdiction(e.target.value || null)} title="Where you live. Some tokenized stocks aren't offered in every region." aria-label="Your region">
-            <option value="">Your region…</option>
-            {JURISDICTIONS.map((j) => <option key={j.code} value={j.code}>{j.name}</option>)}
-          </select>
           {auth.authenticated ? (
             <>
               <button className="chip clickable" onClick={() => setShowPortfolio((v) => !v)} title={auth.address ?? ""}>
@@ -170,6 +167,7 @@ export function Hud() {
             <nav className="crumbs clickable" aria-label="Where you are">
               <button className="crumb-back" onClick={goBack} title="Back" aria-label="Back"><ChevronLeftIcon size={16} /></button>
               <button className="crumb" onClick={() => resetGlobe(false)}><GlobeIcon size={14} />World</button>
+              {focusedRegion ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">{REGION_BY_ID[focusedRegion]?.name}</span></>) : null}
               {focusedCountry ? (
                 <>
                   <span className="crumb-sep" aria-hidden>›</span>
@@ -217,7 +215,8 @@ export function Hud() {
             ) : null}
             {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
             {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && !focusedCompany && !focusedCountry && (news || impact || heatEntries.length) ? (
+            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && focusedRegion ? <RegionPanel key={focusedRegion} id={focusedRegion} /> : null}
+            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && !focusedCompany && !focusedCountry && !focusedRegion && (news || impact || heatEntries.length) ? (
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>{heatEntries.length ? "Portfolio geography" : news?.target ?? "Research"}</h2><div className="sub">{heatEntries.length ? "exposure by country" : "sources"}</div></div><button className="btn ghost sm" onClick={() => resetGlobe(true)}>✕</button></div>
                 <div className="panel-body scroll">

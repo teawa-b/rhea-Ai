@@ -10,6 +10,7 @@ import type { ChartRange, CountryCode, NewsEvent } from "@shared/types";
 import type { RheaAuth } from "@/auth/Auth";
 import { api } from "@/market/api";
 import { assetForCompany, useMarket } from "@/state/market";
+import { REGIONS, REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
 import { describeRule, prepareTrade, prepareTrigger, type TriggerKind } from "@/solana/trade";
 import { fmtAge } from "@/theme";
@@ -47,8 +48,13 @@ async function companyProfile(q: string) {
     position: pos ? { tokens: pos.amountUi, valueUsd: pos.valueUsd } : null,
     activeOrders: orders.map((o) => ({ id: o.id, rule: describeRule(o), simulated: !!o.simulated })),
     corporateActions: d.corporateActions.map((c) => ({ type: c.type, effectiveAt: c.effectiveAt, detail: c.detail })),
-    eligibility: m.jurisdiction ? undefined : "jurisdiction not selected",
   };
+}
+
+function regionResult(id: string) {
+  const region = REGION_BY_ID[id];
+  const markets = (useMarket.getState().overview?.countries ?? []).filter((c) => region.countries.includes(c.code));
+  return { ok: true, region: region.name, markets: markets.map((c) => ({ country: c.name, tradableStocks: c.tradableCount, companies: c.companies.map((cid) => COMPANY_BY_ID[cid]?.name) })) };
 }
 
 export function createToolRunner(getAuth: () => RheaAuth) {
@@ -58,14 +64,26 @@ export function createToolRunner(getAuth: () => RheaAuth) {
 
     switch (name) {
       /* ---------------- Visual ---------------- */
+      case "focus_region": {
+        const id = w.focusRegion(str(args.region));
+        if (!id) throw new Error(`Unknown region "${str(args.region)}". Supported: ${REGIONS.map((r) => r.name).join(", ")}.`);
+        return regionResult(id);
+      }
       case "focus_country": {
+        /* The model sometimes passes a continent here ("Europe"); fly there instead of failing. */
+        if (!resolveCountry(str(args.country))) {
+          const regionId = w.focusRegion(str(args.country));
+          if (regionId) return regionResult(regionId);
+        }
         const code = w.focusCountry(str(args.country));
         if (!code) throw new Error(`Unknown country "${str(args.country)}"`);
         const cs = m.overview?.countries.find((c) => c.code === code);
         return { ok: true, country: COUNTRIES[code].name, assets: cs?.assetCount ?? 0, tradable: cs?.tradableCount ?? 0, companies: (cs?.companies ?? []).map((id) => COMPANY_BY_ID[id]?.name) };
       }
       case "focus_company": {
-        const id = w.focusCompany(str(args.company));
+        const co = needCompany(str(args.company));
+        if (!assetForCompany(co.id)) return { ok: false, error: `${co.name} isn't tradable on Solana right now (no liquidity), so it isn't shown. Suggest a tradable stock from get_market_overview instead.` };
+        const id = w.focusCompany(co.id);
         if (!id) throw new Error(`Unknown company "${str(args.company)}"`);
         void m.loadDetail(id, true);
         void m.loadHistory(id, w.chartRange);
@@ -249,7 +267,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
         const co = needCompany(str(args.company));
         const taker = auth.address ?? "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"; // read-only quote when logged out
         const side = str(args.side) === "sell" ? "sell" : "buy";
-        const q = await api.quote(co.id, side, num(args.amount), taker, m.jurisdiction ?? "CH");
+        const q = await api.quote(co.id, side, num(args.amount), taker);
         return { company: co.name, side, pay: `${q.quote.inAmountUi} ${q.quote.inSymbol}`, receive: `${q.quote.outAmountUi.toFixed(6)} ${q.quote.outSymbol}`, priceImpactPct: q.quote.priceImpactPct, route: q.quote.route, quotedAt: q.quote.quotedAt, note: auth.address ? undefined : "indicative only — user not signed in" };
       }
       case "get_corporate_actions": {
@@ -298,8 +316,8 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       case "check_trade_eligibility": {
         const co = needCompany(str(args.company));
         const action = (["buy", "sell", "trigger"].includes(str(args.action)) ? str(args.action) : "buy") as "buy" | "sell" | "trigger";
-        const r = await api.eligibility(co.id, m.jurisdiction, action);
-        return { company: co.name, jurisdiction: m.jurisdiction ?? "not selected", allowed: r.result.allowed, reasons: r.result.reasons, disclosure: r.result.disclosure, disclosureUrl: r.result.disclosureUrl, asset: r.asset ? { symbol: r.asset.symbol, tradable: r.asset.tradable } : null, signedIn: getAuth().authenticated };
+        const r = await api.eligibility(co.id, action);
+        return { company: co.name, allowed: r.result.allowed, reasons: r.result.reasons, disclosure: r.result.disclosure, disclosureUrl: r.result.disclosureUrl, asset: r.asset ? { symbol: r.asset.symbol, tradable: r.asset.tradable } : null, signedIn: getAuth().authenticated };
       }
 
       default:

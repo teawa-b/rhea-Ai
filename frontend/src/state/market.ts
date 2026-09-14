@@ -11,7 +11,6 @@ type MarketState = {
   histories: Record<string, ChartHistory>;
   portfolio: Portfolio | null;
   wallet: string | null;
-  jurisdiction: string | null;
   orders: AgentRule[];
   trades: TradeIntent[];
   /** The trade / order currently awaiting the user's confirmation. */
@@ -25,7 +24,6 @@ type MarketState = {
   loadDetail: (id: string, force?: boolean) => Promise<CompanyDetail | null>;
   loadHistory: (id: string, range: ChartRange, force?: boolean) => Promise<ChartHistory | null>;
   setWallet: (w: string | null) => void;
-  setJurisdiction: (j: string | null) => void;
   loadPortfolio: () => Promise<Portfolio | null>;
   setPendingTrade: (t: TradeIntent | null) => void;
   setPendingOrder: (o: AgentRule | null) => void;
@@ -36,13 +34,28 @@ type MarketState = {
 };
 
 const LS_ORDERS = "rhea.orders.v1";
-const LS_JUR = "rhea.jurisdiction.v1";
+/* Earlier builds stored a self-selected jurisdiction; the app no longer keeps one. */
+try { localStorage.removeItem("rhea.jurisdiction.v1"); } catch { /* ignore */ }
 
 function loadLS<T>(key: string, fallback: T): T {
   try { const v = localStorage.getItem(key); return v ? (JSON.parse(v) as T) : fallback; } catch { return fallback; }
 }
 function saveLS(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+/** Only stocks that can actually be traded (a price and liquidity on Solana)
+ * appear on the globe, in lists and counts, and in what the AI is offered. */
+function tradableOnly(o: MarketOverview): MarketOverview {
+  const assets = o.assets.filter((a) => a.tradable);
+  const ids = new Set(assets.map((a) => a.companyId));
+  const countries = o.countries
+    .map((c) => {
+      const companies = c.companies.filter((id) => ids.has(id));
+      return { ...c, companies, assetCount: companies.length, tradableCount: companies.length };
+    })
+    .filter((c) => c.companies.length > 0);
+  return { ...o, assets, countries, companies: o.companies.filter((c) => ids.has(c.id)) };
 }
 
 export const useMarket = create<MarketState>((set, get) => ({
@@ -53,7 +66,6 @@ export const useMarket = create<MarketState>((set, get) => ({
   histories: {},
   portfolio: null,
   wallet: null,
-  jurisdiction: loadLS<string | null>(LS_JUR, null),
   orders: loadLS<AgentRule[]>(LS_ORDERS, []),
   trades: [],
   pendingTrade: null,
@@ -65,7 +77,7 @@ export const useMarket = create<MarketState>((set, get) => ({
     catch (e) { set({ lastError: (e as Error).message }); return null; }
   },
   loadOverview: async () => {
-    try { const overview = await api.overview(); set({ overview }); return overview; }
+    try { const overview = tradableOnly(await api.overview()); set({ overview }); return overview; }
     catch (e) { set({ lastError: (e as Error).message }); return null; }
   },
   loadPrices: async (ids) => {
@@ -86,7 +98,6 @@ export const useMarket = create<MarketState>((set, get) => ({
     catch (e) { console.warn("[market] history", (e as Error).message); return null; }
   },
   setWallet: (wallet) => { set({ wallet }); if (wallet) void get().loadPortfolio(); else set({ portfolio: null }); },
-  setJurisdiction: (jurisdiction) => { saveLS(LS_JUR, jurisdiction); set({ jurisdiction }); },
   loadPortfolio: async () => {
     const w = get().wallet;
     if (!w) return null;

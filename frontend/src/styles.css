@@ -125,6 +125,12 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
 .crumb.current { color: #fff; font-weight: 700; cursor: default; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .crumb-sep { color: var(--muted); opacity: .7; font-size: 14px; padding: 0 1px; }
 
+.region-market + .region-market { margin-top: 14px; }
+.region-country { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 6px; padding: 2px 2px 4px; border: 0; border-bottom: 1px solid rgba(63,224,255,0.14); background: none; color: var(--text); cursor: pointer; text-align: left; }
+.region-country .name { font-size: 12px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase; }
+.region-country .meta { font-size: 11px; color: var(--muted); }
+.region-country:hover .name, .region-country:hover .meta { color: var(--cyan); }
+
 .icon-btn { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; color: var(--frost); background: rgba(63,224,255,0.06); border: 1px solid rgba(143,232,255,0.25); transition: color .15s, background .15s, transform .12s; }
 .icon-btn:hover { color: #fff; background: rgba(63,224,255,0.16); }
 .icon-btn:active { transform: scale(0.94); }

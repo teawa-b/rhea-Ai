@@ -19,7 +19,6 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const loadDetail = useMarket((s) => s.loadDetail);
   const portfolio = useMarket((s) => s.portfolio);
   const orders = useMarket((s) => s.orders);
-  const jurisdiction = useMarket((s) => s.jurisdiction);
   const status = useMarket((s) => s.status);
   const setError = useMarket((s) => s.setError);
   const news = useWorld((s) => s.news);
@@ -58,7 +57,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const cls = change == null ? "" : change >= 0 ? "pos" : "neg";
   const divergence = p?.tokenPriceUsd && p?.underlyingPriceUsd ? ((p.tokenPriceUsd - p.underlyingPriceUsd) / p.underlyingPriceUsd) * 100 : null;
   const tradable = detail?.asset?.tradable ?? false;
-  const canTrade = auth.authenticated && !!jurisdiction && tradable;
+  const canTrade = auth.authenticated && tradable;
   const companyNews = news && (news.target === co.name || news.items.some((n) => n.companyIds.includes(co.id))) ? news.items : [];
 
   const doBuy = async () => {
@@ -154,7 +153,6 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         <div className="divider" />
         <div className="hint" style={{ marginBottom: 6 }}>TRADE · Jupiter · Solana</div>
         {!auth.authenticated ? <div className="hint">Sign in to trade. Research stays available.</div> : null}
-        {auth.authenticated && !jurisdiction ? <div className="hint warn">Choose your region in the top bar to trade.</div> : null}
         {detail && !tradable ? <div className="hint warn">Listed, but no onchain liquidity yet — trading disabled.</div> : null}
         <div className="row" style={{ marginTop: 6 }}>
           <input className="chip mono" type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 96 }} />

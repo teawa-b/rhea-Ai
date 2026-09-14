@@ -39,10 +39,10 @@ export const api = {
   prices: (ids?: string[]) => j<Record<string, PriceLite>>(`/api/market/prices${ids?.length ? `?ids=${ids.join(",")}` : ""}`),
   history: (id: string, range: ChartRange) => j<ChartHistory>(`/api/market/history/${encodeURIComponent(id)}?range=${range}`),
   portfolio: (wallet: string) => j<Portfolio>(`/api/market/portfolio/${wallet}`),
-  eligibility: (company: string, jurisdiction: string | null, action: "buy" | "sell" | "trigger", amountUsd?: number) =>
-    j<{ company: Company; asset: TokenizedAsset | null; result: EligibilityResult }>("/api/market/eligibility", { method: "POST", body: JSON.stringify({ company, jurisdiction, action, amountUsd }) }),
-  quote: (company: string, side: "buy" | "sell", amount: number, taker: string, jurisdiction: string | null) =>
-    j<{ quote: TradeQuote; eligibility: EligibilityResult; asset: TokenizedAsset }>("/api/market/quote", { method: "POST", body: JSON.stringify({ company, side, amount, taker, jurisdiction }) }),
+  eligibility: (company: string, action: "buy" | "sell" | "trigger", amountUsd?: number) =>
+    j<{ company: Company; asset: TokenizedAsset | null; result: EligibilityResult }>("/api/market/eligibility", { method: "POST", body: JSON.stringify({ company, action, amountUsd }) }),
+  quote: (company: string, side: "buy" | "sell", amount: number, taker: string) =>
+    j<{ quote: TradeQuote; eligibility: EligibilityResult; asset: TokenizedAsset }>("/api/market/quote", { method: "POST", body: JSON.stringify({ company, side, amount, taker }) }),
   execute: (signedTransaction: string, requestId: string) =>
     j<{ status: string; signature?: string; error?: string; code?: number }>("/api/market/execute", { method: "POST", body: JSON.stringify({ signedTransaction, requestId }) }),
   trigger: (step: "challenge" | "verify" | "vault" | "deposit" | "order" | "cancel" | "history", body: unknown, jwt?: string) =>

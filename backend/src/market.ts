@@ -3,7 +3,7 @@ import type { Request, Response, Router } from "express";
 import express from "express";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  COMPANIES, COMPANY_BY_ID, COUNTRIES, JURISDICTIONS, USDC_MINT,
+  COMPANIES, COMPANY_BY_ID, COUNTRIES, USDC_MINT,
   XSTOCKS_DISCLOSURE_URL, XSTOCKS_MIN_TRADE_USD, XSTOCKS_RESTRICTED_JURISDICTIONS, resolveCompany,
 } from "../shared/registry";
 import type {
@@ -70,16 +70,11 @@ export function capabilityFor(asset: TokenizedAsset): AssetCapability {
   };
 }
 
-export function checkEligibility(asset: TokenizedAsset | undefined, jurisdiction: string | undefined, action: "buy" | "sell" | "trigger", amountUsd?: number): EligibilityResult {
+export function checkEligibility(asset: TokenizedAsset | undefined, action: "buy" | "sell" | "trigger", amountUsd?: number): EligibilityResult {
   const reasons: string[] = [];
   const disclosure = "xStocks are tokenized tracker certificates issued by Backed Finance. They are not available to residents of restricted jurisdictions (including the United States, Canada and the United Kingdom) and carry issuer, market and smart-contract risk. This is not investment advice. Availability shown here is illustrative and must be confirmed against the issuer's terms.";
   if (!asset) return { allowed: false, reasons: ["This company has no tokenized asset on Solana yet."], disclosure, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
   const cap = capabilityFor(asset);
-  if (!jurisdiction) reasons.push("Select your jurisdiction before trading.");
-  else if (cap.restrictedJurisdictions.includes(jurisdiction.toUpperCase())) {
-    const name = JURISDICTIONS.find((j) => j.code === jurisdiction.toUpperCase())?.name ?? jurisdiction;
-    reasons.push(`${asset.symbol} is not offered to residents of ${name} under the issuer's terms.`);
-  }
   if (!cap.tradable && action !== "sell") reasons.push(`${asset.symbol} is listed but has no onchain liquidity yet.`);
   if (action === "buy" && amountUsd != null && amountUsd < cap.minimumTradeUsd) reasons.push(`Minimum trade is $${cap.minimumTradeUsd}.`);
   return { allowed: reasons.length === 0, reasons, disclosure, disclosureUrl: cap.disclosureUrl };
@@ -213,15 +208,15 @@ export function marketRouter(): Router {
   });
 
   r.post("/eligibility", async (req, res) => {
-    const { company, jurisdiction, action, amountUsd } = req.body ?? {};
+    const { company, action, amountUsd } = req.body ?? {};
     const co = resolveCompany(String(company ?? ""));
     if (!co) return bad(res, 404, "Unknown company");
     const asset = await assetFor(co.id);
-    res.json({ company: co, asset: asset ?? null, result: checkEligibility(asset, jurisdiction, action ?? "buy", amountUsd) });
+    res.json({ company: co, asset: asset ?? null, result: checkEligibility(asset, action ?? "buy", amountUsd) });
   });
 
   r.post("/quote", async (req, res) => {
-    const { company, side, amount, taker, jurisdiction } = req.body ?? {};
+    const { company, side, amount, taker } = req.body ?? {};
     const co = resolveCompany(String(company ?? ""));
     if (!co) return bad(res, 404, "Unknown company");
     if (!taker) return bad(res, 400, "Wallet (taker) required");
@@ -229,7 +224,7 @@ export function marketRouter(): Router {
     if (!Number.isFinite(amt) || amt <= 0) return bad(res, 400, "Amount must be positive");
     try {
       const asset = await assetFor(co.id);
-      const elig = checkEligibility(asset, jurisdiction, side === "sell" ? "sell" : "buy", side === "buy" ? amt : undefined);
+      const elig = checkEligibility(asset, side === "sell" ? "sell" : "buy", side === "buy" ? amt : undefined);
       if (!asset || !elig.allowed) return res.status(403).json({ error: "Not eligible", eligibility: elig });
       const quote = await getSwapQuote({ side: side === "sell" ? "sell" : "buy", companyId: co.id, asset, amountUi: amt, taker });
       res.json({ quote, eligibility: elig, asset });

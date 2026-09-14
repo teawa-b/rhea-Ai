@@ -7,8 +7,9 @@
 import { create } from "zustand";
 import type { ChartRange, CountryCode, ImpactAnalysis, NewsEvent } from "@shared/types";
 import { COMPANY_BY_ID, COUNTRIES, resolveCompany, resolveCountry } from "@shared/registry";
+import { REGION_BY_ID, resolveRegion } from "./regions";
 
-export type ViewMode = "world" | "country" | "company";
+export type ViewMode = "world" | "region" | "country" | "company";
 
 export type Connection = {
   id: string;
@@ -32,6 +33,8 @@ export type Comparison = { companyIds: string[] } | null;
 
 type WorldState = {
   view: ViewMode;
+  /** REGIONS id when view === "region" */
+  focusedRegion: string | null;
   focusedCountry: CountryCode | null;
   focusedCompany: string | null;
   highlightedCountries: CountryCode[];
@@ -54,6 +57,7 @@ type WorldState = {
   contextVersion: number;
 
   revealPanel: () => void;
+  focusRegion: (q: string) => string | null;
   focusCountry: (q: string) => CountryCode | null;
   focusCompany: (q: string) => string | null;
   resetGlobe: (clear?: boolean) => void;
@@ -104,6 +108,7 @@ export function resolvePlace(q: string): { lat: number; lng: number; label: stri
 
 export const useWorld = create<WorldState>((set, get) => ({
   view: "world",
+  focusedRegion: null,
   focusedCountry: null,
   focusedCompany: null,
   highlightedCountries: [],
@@ -123,11 +128,29 @@ export const useWorld = create<WorldState>((set, get) => ({
 
   revealPanel: () => { clearTimeout(revealTimer); set({ panelReady: true }); },
 
+  focusRegion: (q) => {
+    const region = resolveRegion(q);
+    if (!region) return null;
+    set((s) => ({
+      view: "region",
+      focusedRegion: region.id,
+      focusedCountry: null,
+      focusedCompany: null,
+      panelReady: s.view === "region" && s.focusedRegion === region.id ? s.panelReady : holdPanelUntilArrival(),
+      highlightedCountries: [...new Set([...s.highlightedCountries, ...region.countries])],
+      comparison: null,
+      streetViewCompany: null,
+      contextVersion: s.contextVersion + 1,
+    }));
+    return region.id;
+  },
+
   focusCountry: (q) => {
     const cd = resolveCountry(q);
     if (!cd) return null;
     set((s) => ({
       view: "country",
+      focusedRegion: null,
       focusedCountry: cd.code,
       focusedCompany: null,
       panelReady: s.view === "country" && s.focusedCountry === cd.code ? s.panelReady : holdPanelUntilArrival(),
@@ -144,6 +167,7 @@ export const useWorld = create<WorldState>((set, get) => ({
     if (!co) return null;
     set((s) => ({
       view: "company",
+      focusedRegion: null,
       focusedCompany: co.id,
       focusedCountry: co.countryCode,
       panelReady: s.view === "company" && s.focusedCompany === co.id ? s.panelReady : holdPanelUntilArrival(),
@@ -160,6 +184,7 @@ export const useWorld = create<WorldState>((set, get) => ({
     clearTimeout(revealTimer);
     set((s) => ({
       view: "world",
+      focusedRegion: null,
       focusedCountry: null,
       focusedCompany: null,
       comparison: null,
@@ -231,6 +256,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       comparison: { companyIds: ids },
       highlightedCompanies: [...new Set([...s.highlightedCompanies, ...ids])],
       view: "world",
+      focusedRegion: null,
       focusedCompany: null,
       focusedCountry: null,
       panelReady: true,
@@ -246,6 +272,7 @@ export function describeWorld(): string {
   const s = useWorld.getState();
   const parts: string[] = [];
   parts.push(`View: ${s.view}.`);
+  if (s.focusedRegion) parts.push(`Focused region: ${REGION_BY_ID[s.focusedRegion]?.name}.`);
   if (s.focusedCountry) parts.push(`Focused country: ${COUNTRIES[s.focusedCountry].name}.`);
   if (s.focusedCompany) {
     const co = COMPANY_BY_ID[s.focusedCompany];
