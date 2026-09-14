@@ -47,6 +47,27 @@ let seq = 0;
 const TURN_GAP_MS = 2200;
 /* Typed questions sent before the session has started. */
 let queued: string[] = [];
+/* Announcements made while no session was open (e.g. "the user just signed
+ * in" right after the sign-in reload); spoken as soon as Rhea connects. */
+let pendingAnnouncements: string[] = [];
+
+/* The conversation survives the reload that picks up a sign-in from the other
+ * tab, so reconnecting carries on instead of starting over with the intro. */
+const CAPTIONS_KEY = "rhea:captions";
+const GREETED_SESSION_KEY = "rhea:greeted";
+const GREETED_EVER_KEY = "rhea:greeted-before";
+const loadCaptions = (): Caption[] => {
+  try {
+    const raw = sessionStorage.getItem(CAPTIONS_KEY);
+    return raw ? (JSON.parse(raw) as Caption[]).map((c) => ({ ...c, done: true })) : [];
+  } catch { return []; }
+};
+const flag = (store: () => Storage, key: string, set?: boolean) => {
+  try {
+    if (set) store().setItem(key, "1");
+    return store().getItem(key) === "1";
+  } catch { return false; }
+};
 
 export const useVoice = create<VoiceStore>((set, get) => {
   const appendCaption = (role: Caption["role"], delta: string, forceNew = false) => {
@@ -58,7 +79,7 @@ export const useVoice = create<VoiceStore>((set, get) => {
         caps[caps.length - 1] = { ...last, text: last.text + delta, at: now };
       } else {
         for (const c of caps) c.done = true;
-        caps.push({ id: `cap_${++seq}`, role, text: delta.trimStart(), at: now, done: false });
+        caps.push({ id: `cap_${now}_${++seq}`, role, text: delta.trimStart(), at: now, done: false });
       }
       return { captions: caps.slice(-8) };
     });
@@ -73,7 +94,7 @@ export const useVoice = create<VoiceStore>((set, get) => {
     client: null,
     state: "off",
     inputMode: "mic",
-    captions: [],
+    captions: loadCaptions(),
     lastTool: null,
     error: null,
     notice: null,
@@ -119,8 +140,14 @@ export const useVoice = create<VoiceStore>((set, get) => {
           if (get().client !== live) return;
           if (live.isConnected) {
             const pendingText = queued; queued = [];
+            const notes = pendingAnnouncements; pendingAnnouncements = [];
+            notes.forEach((t) => live.announce(t));
             if (pendingText.length) pendingText.forEach((t) => deliver(live, t));
-            else if (!history.length) live.greet(greetingFor(auth));
+            else if (!history.length && !notes.length && !flag(() => sessionStorage, GREETED_SESSION_KEY)) {
+              live.greet(greetingFor(authRef ?? auth, flag(() => localStorage, GREETED_EVER_KEY)));
+            }
+            flag(() => sessionStorage, GREETED_SESSION_KEY, true);
+            flag(() => localStorage, GREETED_EVER_KEY, true);
             return;
           }
           if (Date.now() - started < 8000) window.setTimeout(wait, 150);
@@ -188,10 +215,29 @@ export const useVoice = create<VoiceStore>((set, get) => {
       if (!c && a) void get().connect(a, "text");
     },
 
-    announce: (text) => get().client?.announce(text),
+    announce: (text) => {
+      const c = get().client;
+      if (c?.isConnected) c.announce(text);
+      else pendingAnnouncements = [...pendingAnnouncements, text].slice(-3);
+    },
     instruct: (text) => get().client?.instruct(text),
     pushContext: () => { const c = get().client; if (c?.isConnected && authRef) c.pushContext(buildContext(authRef)); },
   };
+});
+
+/* Keep the session's view of the user current. Without this the tool runner
+ * kept the signed-out auth from connect time: fine on desktop (the mic button
+ * reconnects with fresh auth) but in the headset hold-to-talk never does, so
+ * Rhea kept asking a signed-in user to sign in. */
+export function setVoiceAuth(auth: RheaAuth) {
+  const changed = authRef?.authenticated !== auth.authenticated || authRef?.address !== auth.address;
+  authRef = auth;
+  if (changed) useVoice.getState().pushContext();
+}
+
+useVoice.subscribe((s, prev) => {
+  if (s.captions === prev.captions) return;
+  try { sessionStorage.setItem(CAPTIONS_KEY, JSON.stringify(s.captions)); } catch { /* storage blocked */ }
 });
 
 export function buildContext(auth: RheaAuth) {

@@ -156,7 +156,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       }
       case "show_portfolio_exposure": {
         const p = m.portfolio ?? (await m.loadPortfolio());
-        if (!p) { m.setLoginPrompt({ reason: "Sign in to see your portfolio on the globe" }); throw new Error("No wallet connected — a sign-in panel is now showing; ask the user to sign in there"); }
+        if (!p) { m.setLoginPrompt({ reason: "Sign in to see your portfolio on the globe", after: "show_portfolio_exposure" }); throw new Error("No wallet connected — a sign-in panel is now showing; ask the user to sign in there"); }
         const dim = str(args.dimension) === "sector" ? "sector" : "country";
         const buckets = new Map<string, number>();
         let total = 0;
@@ -250,7 +250,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       case "get_portfolio": {
         const auth = getAuth();
         if (!auth.authenticated) {
-          m.setLoginPrompt({ reason: "Sign in to see your portfolio" });
+          m.setLoginPrompt({ reason: "Sign in to see your portfolio", after: "get_portfolio" });
           return { ok: false, error: "User is not signed in. A sign-in panel is now showing: ask them to sign in there (Google, email or a wallet); it creates an embedded Solana wallet for them." };
         }
         const p = await m.loadPortfolio();
@@ -268,7 +268,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       case "show_holdings": {
         const auth = getAuth();
         if (!auth.authenticated) {
-          m.setLoginPrompt({ reason: "Sign in to see your holdings" });
+          m.setLoginPrompt({ reason: "Sign in to see your holdings", after: "show_holdings" });
           return { ok: false, error: "User is not signed in. A sign-in panel is now showing: ask them to sign in there; their holdings planet opens once they're in." };
         }
         w.showHoldings();

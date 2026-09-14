@@ -8,7 +8,8 @@ import { api, type CompanyDetail, type PriceLite, type ServerStatus } from "@/ma
 export type PendingIntent =
   | { kind: "buy" | "sell"; companyId: string; amount: number }
   | { kind: "trigger"; companyId: string; triggerKind: "buy_below" | "sell_above"; priceUsd: number; amount: number; expiresInDays: number };
-export type LoginPrompt = { reason: string; resume?: PendingIntent };
+/** `after`: what Rhea should do once the user is in, for non-trade requests (e.g. "show_holdings"). */
+export type LoginPrompt = { reason: string; resume?: PendingIntent; after?: string };
 export type DepositPrompt = { neededUsd: number; haveUsd: number; resume?: PendingIntent };
 
 type MarketState = {

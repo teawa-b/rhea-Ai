@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import { RheaAuthProvider, useAuth } from "@/auth/Auth";
 import { useSignInTabSync } from "@/auth/signinTab";
-import { useVoice, wireContextUpdates } from "@/ai/voice";
+import { setVoiceAuth, useVoice, wireContextUpdates } from "@/ai/voice";
 import { analyticsSummary, track, wireAnalytics } from "@/analytics";
 import { RheaScene, enterImmersive, xrStore } from "@/scene/RheaScene";
 import { xrGlobe } from "@/scene/CameraRig";
@@ -40,14 +40,20 @@ function IntentResumer() {
   const portfolio = useMarket((s) => s.portfolio);
   const firstName = auth.displayName && !auth.displayName.includes("…") ? auth.displayName.split(" ")[0] : null;
   useSignInTabSync(auth);
+  useEffect(() => { setVoiceAuth(auth); }, [auth]);
 
   useEffect(() => {
     if (!auth.authenticated || !auth.address || !loginPrompt) return;
-    const { resume } = loginPrompt;
+    const { resume, after } = loginPrompt;
     useMarket.getState().setLoginPrompt(null);
     const who = firstName ? ` as ${firstName}` : "";
     const v = useVoice.getState();
-    if (!resume) { v.announce(`The user just signed in${who}. Welcome them briefly and carry on.`); return; }
+    if (!resume) {
+      v.announce(after
+        ? `The user just signed in${who}; they're now authenticated with a wallet. They had asked for something that needed sign-in, so call ${after} now and tell them the result briefly.`
+        : `The user just signed in${who}. Welcome them briefly and carry on.`);
+      return;
+    }
     void resumeIntent(auth, resume).then((r) => {
       if (r.ok) v.announce(`The user just signed in${who}; their request to ${describeIntent(resume)} is ready on the panel. Tell them briefly and ask them to press Confirm.`);
       else v.announce(`The user just signed in${who}. ${r.error ?? ""}`);

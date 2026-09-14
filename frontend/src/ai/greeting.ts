@@ -3,9 +3,11 @@ import type { RheaAuth } from "@/auth/Auth";
 import { COMPANY_BY_ID } from "@shared/registry";
 import { useMarket } from "@/state/market";
 
-export function greetingFor(auth: RheaAuth) {
+export function greetingFor(auth: RheaAuth, returning = false) {
   const m = useMarket.getState();
   const name = auth.displayName && !auth.displayName.includes("…") ? auth.displayName.split(" ")[0] : null;
+  /* Someone who has used Rhea before in this browser gets a one-line welcome back, not the tour. */
+  if (returning) return `Say this right now, without waiting for the user: one short, warm "welcome back"${name ? ` to ${name}` : ""} as Rhea — no introduction or examples, they already know the app. Then stop and listen.`;
   let portfolio = "";
   if (m.portfolio && m.portfolio.positions.length) {
     const top = m.portfolio.positions.slice(0, 3).map((p) => COMPANY_BY_ID[p.companyId]?.name ?? p.symbol).join(", ");
