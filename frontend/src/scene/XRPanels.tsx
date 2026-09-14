@@ -27,8 +27,8 @@ import { drawChart } from "@/ui/chartDraw";
 /* Chart cluster: eye level, right of the globe, turned slightly toward the user. */
 const CLUSTER_POS: [number, number, number] = [0.6, 1.5, -1.3];
 const CLUSTER_ROT: [number, number, number] = [0, -0.34, 0];
-/* Captions + voice orb hang just under the globe and follow it as it grows,
- * shrinks and moves (see xrGlobe in CameraRig). */
+/* Captions float just above the globe and the voice orb hangs just under it;
+ * both follow it as it grows, shrinks and moves (see xrGlobe in CameraRig). */
 const CAPTION_GAP = 0.09;
 const RANGES: ChartRange[] = ["1D", "5D", "1M", "1Y"];
 
@@ -343,13 +343,28 @@ function useUnderGlobe(ref: RefObject<THREE.Group | null>, dy = 0) {
   });
 }
 
-/** Floating captions + status under the globe. */
+/* Captions sit above the globe, but never so high the user has to crane up:
+ * past this height they float in front of the planet's upper half instead. */
+const CAPTION_MAX_Y = 1.78;
+
+/** Follows the globe: just above it, the text growing upward from the status line. */
+function useAboveGlobe(ref: RefObject<THREE.Group | null>) {
+  useFrame(() => {
+    const g = ref.current;
+    if (!g) return;
+    const { pos, scale } = xrGlobe;
+    const y = pos.y + scale + CAPTION_GAP;
+    g.position.set(pos.x + 0.06, Math.min(y, CAPTION_MAX_Y), pos.z + scale * (y > CAPTION_MAX_Y ? 1.05 : 0.35));
+  });
+}
+
+/** Floating captions + status above the globe. */
 function Captions() {
   const captions = useVoice((s) => s.captions);
   const state = useVoice((s) => s.state);
   const holding = useVoice((s) => s.holding);
   const ref = useRef<THREE.Group>(null);
-  useUnderGlobe(ref);
+  useAboveGlobe(ref);
   const last = captions.slice(-2);
   const status = holding ? "LISTENING · RELEASE WHEN DONE"
     : state === "connecting" ? "CONNECTING…"
@@ -358,12 +373,13 @@ function Captions() {
     : "HOLD  A  TO SPEAK";
   return (
     <group ref={ref}>
-      {last.map((c, i) => (
-        <Text key={c.id} position={[0, (last.length - 1 - i) * 0.085, 0]} fontSize={0.026} color={c.role === "user" ? "#e6dcff" : "#e8f4ff"} anchorX="center" anchorY="middle" maxWidth={1.1} textAlign="center" {...OUTLINE}>
-          {`${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-200)}`}
+      {/* Status line hugs the globe; captions stack upward from it (bottom-anchored so wrapping grows up). */}
+      {last.length ? (
+        <Text position={[0, 0.03, 0]} fontSize={0.026} color="#e8f4ff" anchorX="center" anchorY="bottom" maxWidth={1.1} textAlign="center" lineHeight={1.35} {...OUTLINE}>
+          {last.map((c) => `${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-200)}`).join("\n")}
         </Text>
-      ))}
-      <Text position={[0, -0.085, 0]} fontSize={0.017} color={holding ? C.violet : state === "speaking" ? C.solGreen : state === "thinking" ? C.amber : "#b8c7da"} anchorX="center" anchorY="middle" letterSpacing={0.2} {...OUTLINE}>
+      ) : null}
+      <Text position={[0, 0, 0]} fontSize={0.017} color={holding ? C.violet : state === "speaking" ? C.solGreen : state === "thinking" ? C.amber : "#b8c7da"} anchorX="center" anchorY="middle" letterSpacing={0.2} {...OUTLINE}>
         {status}
       </Text>
     </group>
@@ -378,7 +394,7 @@ function VoiceOrb() {
   const auth = useAuth();
   const ref = useRef<THREE.Mesh>(null);
   const anchor = useRef<THREE.Group>(null);
-  useUnderGlobe(anchor, -0.16);
+  useUnderGlobe(anchor);
   useFrame((s) => {
     if (!ref.current) return;
     const t = s.clock.elapsedTime;
