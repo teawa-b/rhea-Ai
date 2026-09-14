@@ -1,17 +1,26 @@
-/* Rhea — curated company + country registry.
+/* Rhea — company + country registry.
  *
  * DUPLICATED in frontend/shared/ and backend/shared/ (they deploy separately).
  * If you edit this file, copy it to the other folder too.
  *
- * The registry maps tokenized equities (xStocks on Solana) to real-world
- * companies, sectors, countries and headquarters coordinates so the globe can
- * place them. Prices, availability and asset counts are NEVER taken from here
- * — they come from live Jupiter / Pyth data at runtime (spec §3.1).
+ * COMPANIES is built from the FULL xStocks catalog (xstocks-catalog.ts, ~830
+ * products) so every tokenized equity the issuer has minted on Solana is known
+ * to the app. CURATED below overlays real-world metadata — ticker, country,
+ * sector, headquarters coordinates — so the globe can place a company at its
+ * HQ; uncurated catalog entries fall back to a heuristic country + centroid.
+ * Prices, availability and asset counts are NEVER taken from here — they come
+ * from live Jupiter / Pyth data at runtime (spec §3.1). Only tokens with
+ * onchain liquidity >= MIN_TRADABLE_LIQUIDITY_USD surface as tradable.
  *
  * `featured` companies are the polished set that get a hero marker in the
  * country view (spec §3.3: "a limited set of polished company locations").
  */
 import type { Company, CountryCode } from "./types";
+import { XSTOCKS_CATALOG } from "./xstocks-catalog";
+
+/** A token is "tradable" only when Jupiter reports at least this much onchain
+ *  liquidity. Below ~$100 a swap of any size slips badly or fails to route. */
+export const MIN_TRADABLE_LIQUIDITY_USD = 100;
 
 export type CountryDef = { code: CountryCode; name: string; lat: number; lng: number; demonym?: string };
 
@@ -33,13 +42,14 @@ export const COUNTRIES: Record<CountryCode, CountryDef> = {
   AU: { code: "AU", name: "Australia", lat: -25.3, lng: 133.8 },
   SG: { code: "SG", name: "Singapore", lat: 1.35, lng: 103.8 },
   IE: { code: "IE", name: "Ireland", lat: 53.4, lng: -8.2 },
+  IT: { code: "IT", name: "Italy", lat: 41.9, lng: 12.6 },
 };
 
 /* Numeric ISO 3166-1 ids used by world-atlas topojson → our codes. */
 export const ISO_NUMERIC_TO_CODE: Record<string, CountryCode> = {
   "840": "US", "156": "CN", "344": "HK", "158": "TW", "826": "GB", "392": "JP",
   "208": "DK", "528": "NL", "276": "DE", "250": "FR", "756": "CH", "410": "KR",
-  "356": "IN", "124": "CA", "036": "AU", "702": "SG", "372": "IE",
+  "356": "IN", "124": "CA", "036": "AU", "702": "SG", "372": "IE", "380": "IT",
 };
 
 const c = (
@@ -48,7 +58,9 @@ const c = (
   extra: Partial<Company> = {},
 ): Company => ({ id, name, ticker, countryCode, sector, tokenSymbol, headquarters: hq, ...extra });
 
-export const COMPANIES: Company[] = [
+/* Curated overlay, keyed by tokenSymbol when merged with the catalog. Keep the
+ * ids stable — they are persisted in saved agent rules and used by aliases. */
+const CURATED: Company[] = [
   /* ---------------- United States (featured) ---------------- */
   c("nvidia", "NVIDIA", "NVDA", "US", "Semiconductors", "NVDAx",
     { name: "Santa Clara, California", lat: 37.3708, lng: -121.9691 }, { featured: true, pythSymbol: "Equity.US.NVDA/USD" }),
@@ -189,80 +201,99 @@ export const COMPANIES: Company[] = [
     { name: "North Point, Hong Kong", lat: 22.2900, lng: 114.2000 }, { yahooSymbol: "0003.HK" }),
   c("wharf", "The Wharf Holdings", "0004.HK", "HK", "Property", "WRFHDx",
     { name: "Tsim Sha Tsui, Hong Kong", lat: 22.2950, lng: 114.1690 }, { yahooSymbol: "0004.HK" }),
+  /* ---------------- Added 14 Sep 2026: liquid on Jupiter but previously uncurated ---------------- */
+  c("strategy-strc", "Strategy STRC Preferred", "STRC", "US", "Preferred Stock / Bitcoin Treasury", "STRCx",
+    { name: "Tysons Corner, Virginia", lat: 38.9187, lng: -77.2311 }),
+  c("defi-development", "DeFi Development Corp", "DFDV", "US", "Solana Treasury", "DFDVx",
+    { name: "Boca Raton, Florida", lat: 26.3683, lng: -80.1289 }),
+  c("tqqq", "ProShares UltraPro QQQ", "TQQQ", "US", "Leveraged Index Fund", "TQQQx", undefined),
+  c("constellation-energy", "Constellation Energy", "CEG", "US", "Nuclear / Utilities", "CEGx",
+    { name: "Baltimore, Maryland", lat: 39.2904, lng: -76.6122 }),
+  c("bitmine", "Bitmine Immersion", "BMNR", "US", "Ethereum Treasury / Mining", "BMNRx",
+    { name: "Las Vegas, Nevada", lat: 36.1699, lng: -115.1398 }),
+  c("ibm", "IBM", "IBM", "US", "Enterprise IT", "IBMx",
+    { name: "Armonk, New York", lat: 41.1265, lng: -73.7140 }, { pythSymbol: "Equity.US.IBM/USD" }),
+  c("procter-gamble", "Procter & Gamble", "PG", "US", "Consumer Goods", "PGx",
+    { name: "Cincinnati, Ohio", lat: 39.1031, lng: -84.5120 }),
+  c("vti", "Vanguard Total Stock Market ETF", "VTI", "US", "Index Fund", "VTIx", undefined),
+  c("linde", "Linde", "LIN", "GB", "Industrial Gases", "LINx",
+    { name: "Woking, England", lat: 51.3168, lng: -0.5600 }),
+  c("bank-of-america", "Bank of America", "BAC", "US", "Banking", "BACx",
+    { name: "Charlotte, North Carolina", lat: 35.2271, lng: -80.8431 }),
+  c("comcast", "Comcast", "CMCSA", "US", "Media / Telecom", "CMCSAx",
+    { name: "Philadelphia, Pennsylvania", lat: 39.9526, lng: -75.1652 }),
+  c("sk-hynix", "SK hynix", "000660.KS", "KR", "Memory Semiconductors", "SKHYx",
+    { name: "Icheon, South Korea", lat: 37.2720, lng: 127.4350 }),
+  c("amber", "Amber International", "AMBR", "SG", "Crypto Finance", "AMBRx",
+    { name: "Singapore", lat: 1.2897, lng: 103.8501 }),
+  c("abbott", "Abbott", "ABT", "US", "Healthcare", "ABTx",
+    { name: "Abbott Park, Illinois", lat: 42.3061, lng: -87.9052 }),
+  c("xle", "Energy Select Sector SPDR", "XLE", "US", "Sector Fund", "XLEx", undefined),
+  c("sandisk", "Sandisk", "SNDK", "US", "Flash Memory", "SNDKx",
+    { name: "Milpitas, California", lat: 37.4323, lng: -121.8996 }),
+  c("pfizer", "Pfizer", "PFE", "US", "Pharmaceuticals", "PFEx",
+    { name: "New York, New York", lat: 40.7505, lng: -73.9934 }),
+  c("honeywell", "Honeywell", "HON", "US", "Industrial Conglomerate", "HONx",
+    { name: "Charlotte, North Carolina", lat: 35.2271, lng: -80.8431 }),
+  c("iwm", "iShares Russell 2000 ETF", "IWM", "US", "Index Fund", "IWMx", undefined),
+  c("vt", "Vanguard Total World ETF", "VT", "US", "Index Fund", "VTx", undefined),
+  c("goldman-sachs", "Goldman Sachs", "GS", "US", "Investment Banking", "GSx",
+    { name: "New York, New York", lat: 40.7148, lng: -74.0142 }),
+  c("philip-morris", "Philip Morris International", "PM", "US", "Tobacco", "PMx",
+    { name: "Stamford, Connecticut", lat: 41.0534, lng: -73.5387 }),
+  c("accenture", "Accenture", "ACN", "IE", "IT Consulting", "ACNx",
+    { name: "Dublin, Ireland", lat: 53.3498, lng: -6.2603 }),
+  c("merck", "Merck", "MRK", "US", "Pharmaceuticals", "MRKx",
+    { name: "Rahway, New Jersey", lat: 40.6082, lng: -74.2776 }),
+  c("ast-spacemobile", "AST SpaceMobile", "ASTS", "US", "Satellite Telecom", "ASTSx",
+    { name: "Midland, Texas", lat: 31.9973, lng: -102.0779 }),
+  c("sharplink", "SharpLink Gaming", "SBET", "US", "Ethereum Treasury", "SBETx",
+    { name: "Minneapolis, Minnesota", lat: 44.9778, lng: -93.2650 }),
+  c("thermo-fisher", "Thermo Fisher Scientific", "TMO", "US", "Life Sciences", "TMOx",
+    { name: "Waltham, Massachusetts", lat: 42.3765, lng: -71.2356 }),
+  c("crowdstrike", "CrowdStrike", "CRWD", "US", "Cybersecurity", "CRWDx",
+    { name: "Austin, Texas", lat: 30.2672, lng: -97.7431 }),
+  c("riot", "Riot Platforms", "RIOT", "US", "Bitcoin Mining", "RIOTx",
+    { name: "Castle Rock, Colorado", lat: 39.3722, lng: -104.8561 }),
+  c("ura", "Global X Uranium ETF", "URA", "US", "Sector Fund", "URAx", undefined),
+  c("schf", "Schwab International Equity ETF", "SCHF", "US", "Index Fund", "SCHFx", undefined),
+  c("ijr", "iShares Core S&P Small-Cap ETF", "IJR", "US", "Index Fund", "IJRx", undefined),
+  c("bending-spoons", "Bending Spoons", "BSP", "IT", "Software (private)", "BSPx",
+    { name: "Milan, Italy", lat: 45.4642, lng: 9.1900 }),
+  c("abbvie", "AbbVie", "ABBV", "US", "Pharmaceuticals", "ABBVx",
+    { name: "North Chicago, Illinois", lat: 42.3256, lng: -87.8412 }),
+  c("adobe", "Adobe", "ADBE", "US", "Software", "ADBEx",
+    { name: "San Jose, California", lat: 37.3307, lng: -121.8942 }),
+  c("energy-fuels", "Energy Fuels", "UUUU", "US", "Uranium Mining", "UUUUx",
+    { name: "Lakewood, Colorado", lat: 39.7047, lng: -105.0814 }),
+  c("fundrise-innovation", "Fundrise Innovation Fund", "VCX", "US", "Venture Fund", "VCXx", undefined),
+  c("slv", "iShares Silver Trust", "SLV", "US", "Commodity Fund", "SLVx", undefined),
 ];
 
 
-/* Known xStocks mints (Token-2022, 8 decimals) — verified live 12 Sep 2026. */
-export const SEED_MINTS: Record<string, string> = {
-  "NVDAx": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
-  "AAPLx": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
-  "TSLAx": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
-  "MSFTx": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
-  "AMDx": "XsXcJ6GZ9kVnjqGsjBnktRcuwMBmvKWh8S93RefZ1rF",
-  "GOOGLx": "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
-  "METAx": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
-  "AMZNx": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
-  "COINx": "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
-  "MSTRx": "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
-  "PLTRx": "XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4",
-  "AVGOx": "XsgSaSvNSqLTtFuyWPBhK9196Xb9Bbdyjj4fH3cPJGo",
-  "INTCx": "XshPgPdXFRWB8tP1j82rebb2Q9rPgGX37RuqzohmArM",
-  "MUx": "XsQLZycSZ7QnBBdBXQaTbQdiUcbRqjNJgyBGAMzhHav",
-  "MRVLx": "XsuxRGDzbLjnJ72v74b7p9VY6N66uYgTCyfwwRjVCJA",
-  "NFLXx": "XsEH7wWfJJu2ZT3UCFeVfALnVA6CP5ur7Ee11KmzVpL",
-  "ORCLx": "XsjFwUPiLofddX5cWFHW35GCbXcSu1BCUGfxoQAQjeL",
-  "JPMx": "XsMAqkcKsUewDrzVkait4e5u4y8REgtyS7jWgCpLV2C",
-  "BRK.Bx": "Xs6B6zawENwAbWVi7w92rjazLuAr5Az59qgWKcNb45x",
-  "LLYx": "Xsnuv4omNoHozR6EEW5mXkw8Nrny5rB3jVfLqi6gKMH",
-  "JNJx": "XsGVi5eo1Dh2zUpic4qACcjuWGjNv8GCt3dm5XcX6Dn",
-  "UNHx": "XszvaiXGPwvk2nwb3o9C1CX4K6zH8sez11E6uyup6fe",
-  "Vx": "XsqgsbXwWogGJsNcVZ3TyVouy2MbTkfCFhCGGGcQZ2p",
-  "MAx": "XsApJFV9MAktqnAc6jqzsHVujxkGm9xcSUffaBoYLKC",
-  "WMTx": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
-  "XOMx": "XsaHND8sHyfMfsWPj6kSdd5VwvCayZvjYgKmmcNL5qh",
-  "CVXx": "XsNNMt7WTNA2sV3jrb1NNfNgapxRF5i4i6GcnTRRHts",
-  "KOx": "XsaBXg8dU5cPM6ehmVctMkVqoiRG2ZjMo1cyBJ3AykQ",
-  "PEPx": "Xsv99frTRUeornyvCfvhnDesQDWuvns1M852Pez91vF",
-  "MCDx": "XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",
-  "HOODx": "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
-  "CRCLx": "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",
-  "UBERx": "XsAsZLF4MmsvS1sDxRMrUz7REjHfwbC9UAMXSRBqgEB",
-  "CRMx": "XsczbcQ3zfcgAEt9qHQES8pxKAVG5rujPSHQEXi4kaN",
-  "CSCOx": "Xsr3pdLQyXvDJBFgpR5nexCEZwXvigb8wbPYp4YoNFf",
-  "GMEx": "Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc",
-  "CRWVx": "Xs3trfdPXSZuxBJsgau6HRfu8SdrCirkwHpPNgSpJz9",
-  "APPx": "XsPdAVBi8Zc1xvv53k4JcMrQaEDTgkGqKYeh7AYgPHV",
-  "SPCXx": "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8",
-  "SPYx": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
-  "QQQx": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
-  "GLDx": "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",
-  "TSMx": "XsafvsGtzFqqHgTnA3aPC83EAMkacU5mcGtcSayhpVV",
-  "AZNx": "Xs3ZFkPYT2BN7qBMqf1j1bfTeTm1rFzEFSsQ1z3wAKU",
-  "ARMx": "XswUFSYE5CWsZM3X3yo6e2pZvxcAzx912DonGvgUFka",
-  "ASMLx": "XshuHQ6o6SVpUNawvnnTMxsZ4tacZsNgVCLorv7TkFq",
-  "NVOx": "XsfAzPzYrYjd4Dpa9BU3cusBsvWfVB9gBcyGC87S57n",
-  "TCENTx": "XsXb7KCxcxTi6hqWfYyEe1kpTwtiCeU5TJbEz8N7RWn",
-  "XIAOx": "XsvP4b65AoC8f2hEuXj3yAKzRCLtW4aCQupZcuK1vAe",
-  "BYDCOx": "Xsbcv5nSVTc5A7jRZNe2Sg6VtgCyyb32SC2nnaPK5MZ",
-  "MEITx": "XsLvCfSnXJjoVaAJENHxKRzCZaWJpyVQQfJgkHp9oXM",
-  "KUAIx": "XsD9Zgip86m52ob2c9MNTtDVoin1KmgdCNUCCDwsEPF",
-  "GEELx": "XsxsXLryvGn9xUBvkzcjNLR9C1krKy8YEySN7yVEyme",
-  "ANTASx": "XsdP2Pc9F6UsUujiydSsBGZGNYpDMivEjNfQ1ytHD1P",
-  "ICBCx": "XswoSyxJ3NayixJFM4y7JUNL8CFDrL68oUw7nr3Kbnz",
-  "CCONBx": "XsvPonyU9dZWsZsT2rJ1MBRAmPw8gMtS7M3ERko8XkK",
-  "PICOx": "XsioL5whfekeqi92geGL9hqkDWJ2XuDbXDcmBkJktro",
-  "SUOPTx": "XsVpajrhXA4CffEm652abYSS2iDiKnLnarPYxaokYis",
-  "SNBIOx": "XsyeAGJ5CS1uDtDcnFaHTW3QCF5eL2CAt8vcrRBeAs5",
-  "CSPCx": "Xs5hnQoLHnA2xeHaaxYGkCV2Kp12SwCEeCKBK7BW3gr",
-  "CRESBx": "XsptDxuTbpFNx9vic5CMDRiGzPDhNDcVp2i9bUdTktn",
-  "HKEXCx": "XsZQt7qW9vH5SWXZPsn1ZAybCSkq5MW2r6HGo891u1X",
-  "AIAGRx": "XsQk7zRMNmbgSr4ZnvANH4enGH7zkUAtahKuckYy7x7",
-  "BOCHKx": "XsdyyYJSCDVHBdAujSoWnQEDBQi9Y85YxoGVueJNf1j",
-  "HKCGAx": "XsgLierNGzsEw1eziSPaKANRPfxXadZ6syo4WdGz2S7",
-  "WRFHDx": "XsQqWNfMfAVg8hSfGMFzSvEfqwhid5qcZVmm6ny6g3a",
-};
+/* ---------------- Build COMPANIES from the catalog ---------------- */
 
-for (const co of COMPANIES) if (SEED_MINTS[co.tokenSymbol]) co.seedMint = SEED_MINTS[co.tokenSymbol];
+const CURATED_BY_TOKEN = new Map(CURATED.map((co) => [co.tokenSymbol.toUpperCase(), co]));
+
+/* Uncurated entries use the issuer's listing country (the exchange the
+ * underlying trades on). Only countries we can draw get a pin; anything else
+ * (or unset) sits in the US bucket until someone curates it. */
+const listingCountry = (c: string | null): CountryCode => (c && c in COUNTRIES ? (c as CountryCode) : "US");
+
+export const COMPANIES: Company[] = XSTOCKS_CATALOG.map((entry) => {
+  const cur = CURATED_BY_TOKEN.get(entry.symbol.toUpperCase());
+  if (cur) return { ...cur, seedMint: entry.mint, icon: entry.icon };
+  return {
+    id: entry.slug,
+    name: entry.name,
+    ticker: entry.ticker,
+    countryCode: listingCountry(entry.country),
+    sector: entry.fund ? "Fund" : entry.exchange ? `Equity · ${entry.exchange}` : "Equity",
+    tokenSymbol: entry.symbol,
+    seedMint: entry.mint,
+    icon: entry.icon,
+  };
+});
 
 export const COMPANY_BY_ID = Object.fromEntries(COMPANIES.map((co) => [co.id, co])) as Record<string, Company>;
 export const COMPANY_BY_TOKEN = Object.fromEntries(COMPANIES.map((co) => [co.tokenSymbol.toUpperCase(), co])) as Record<string, Company>;
@@ -300,9 +331,11 @@ const COMPANY_ALIASES: Record<string, string> = {
   "mcdonald's": "mcdonalds", "mcdonalds": "mcdonalds", exxonmobil: "exxon", lilly: "eli-lilly", "eli lilly": "eli-lilly", "gold trust": "gold",
   "novo": "novo-nordisk", astra: "astrazeneca", "arm holdings": "arm", "hong kong exchanges": "hkex", "hkex": "hkex", "spacex": "spacex",
   "united health": "unitedhealth", "space x": "spacex", "core weave": "coreweave", "app lovin": "applovin", "micron": "micron",
+  "p&g": "procter-gamble", "procter and gamble": "procter-gamble", "bofa": "bank-of-america", "bank of america": "bank-of-america",
+  "goldman": "goldman-sachs", "strc": "strategy-strc", "dfdv": "defi-development", "defi dev": "defi-development", "russell 2000": "iwm",
 };
 
-const COUNTRY_WORDS = new Set(["usa", "united states", "america", "us", "u.s.", "china", "prc", "hong kong", "hk", "taiwan", "uk", "united kingdom", "britain", "england", "japan", "denmark", "netherlands", "holland", "germany", "france", "switzerland", "korea", "south korea", "india", "canada", "australia", "singapore", "ireland"]);
+const COUNTRY_WORDS = new Set(["usa", "united states", "america", "us", "u.s.", "china", "prc", "hong kong", "hk", "taiwan", "uk", "united kingdom", "britain", "england", "japan", "denmark", "netherlands", "holland", "germany", "france", "switzerland", "korea", "south korea", "india", "canada", "australia", "singapore", "ireland", "italy"]);
 
 export function resolveCountry(query: string): CountryDef | undefined {
   const q = query.trim().toLowerCase();
@@ -315,7 +348,7 @@ export function resolveCountry(query: string): CountryDef | undefined {
     uk: "GB", "united kingdom": "GB", britain: "GB", england: "GB",
     japan: "JP", denmark: "DK", netherlands: "NL", holland: "NL", germany: "DE",
     france: "FR", switzerland: "CH", korea: "KR", "south korea": "KR", india: "IN",
-    canada: "CA", australia: "AU", singapore: "SG", ireland: "IE",
+    canada: "CA", australia: "AU", singapore: "SG", ireland: "IE", italy: "IT",
   };
   const code = aliases[q];
   if (code) return COUNTRIES[code];

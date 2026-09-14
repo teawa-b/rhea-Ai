@@ -3,7 +3,7 @@ import type { Request, Response, Router } from "express";
 import express from "express";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  COMPANIES, COMPANY_BY_ID, COUNTRIES, USDC_MINT,
+  COMPANIES, COMPANY_BY_ID, COUNTRIES, MIN_TRADABLE_LIQUIDITY_USD, USDC_MINT,
   XSTOCKS_DISCLOSURE_URL, XSTOCKS_MIN_TRADE_USD, XSTOCKS_RESTRICTED_JURISDICTIONS, resolveCompany,
 } from "../shared/registry";
 import type {
@@ -75,7 +75,7 @@ export function checkEligibility(asset: TokenizedAsset | undefined, action: "buy
   const disclosure = "xStocks are tokenized tracker certificates issued by Backed Finance. They are not available to residents of restricted jurisdictions (including the United States, Canada and the United Kingdom) and carry issuer, market and smart-contract risk. This is not investment advice. Availability shown here is illustrative and must be confirmed against the issuer's terms.";
   if (!asset) return { allowed: false, reasons: ["This company has no tokenized asset on Solana yet."], disclosure, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
   const cap = capabilityFor(asset);
-  if (!cap.tradable && action !== "sell") reasons.push(`${asset.symbol} is listed but has no onchain liquidity yet.`);
+  if (!cap.tradable && action !== "sell") reasons.push(`${asset.symbol} is listed but has too little onchain liquidity to trade (under $${MIN_TRADABLE_LIQUIDITY_USD}).`);
   if (action === "buy" && amountUsd != null && amountUsd < cap.minimumTradeUsd) reasons.push(`Minimum trade is $${cap.minimumTradeUsd}.`);
   return { allowed: reasons.length === 0, reasons, disclosure, disclosureUrl: cap.disclosureUrl };
 }

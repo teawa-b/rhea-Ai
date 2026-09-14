@@ -6,6 +6,7 @@
  */
 import "dotenv/config";
 import express from "express";
+import { listTokenizedAssets } from "./jupiter";
 import { createLiveSession } from "./live";
 import { marketRouter } from "./market";
 
@@ -53,4 +54,9 @@ app.listen(port, "0.0.0.0", () => {
   console.log(`[rhea] api listening on http://0.0.0.0:${port} (${isProd ? "production" : "development"})`);
   console.log(`[rhea] CORS ${allowedOrigins.length ? allowedOrigins.join(", ") : "any origin (set CORS_ORIGIN to lock it down)"}`);
   console.log(`[rhea] OpenAI ${process.env.OPENAI_API_KEY ? "✓" : "✗ (set OPENAI_API_KEY)"} · Jupiter key ${process.env.JUPITER_API_KEY ? "✓" : "– (keyless lite-api)"} · Pyth Pro ${process.env.PYTH_PRO_API_KEY ? "✓" : "– (Yahoo fallback)"}`);
+  /* Warm the asset cache: pricing the full 715-token catalog takes ~5s keyless,
+   * and the first /overview should not pay for it. */
+  listTokenizedAssets()
+    .then((a) => console.log(`[rhea] xStocks catalog: ${a.length} listed · ${a.filter((x) => x.tradable).length} tradable on Solana`))
+    .catch((e) => console.warn("[rhea] catalog warm-up failed:", (e as Error).message));
 });

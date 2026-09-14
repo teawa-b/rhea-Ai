@@ -3,7 +3,7 @@
  * If you edit this file, copy it to the other folder too. */
 
 export type CountryCode =
-  | "US" | "CN" | "HK" | "TW" | "GB" | "JP" | "DK" | "NL" | "DE" | "FR" | "CH" | "KR" | "IN" | "CA" | "AU" | "SG" | "IE";
+  | "US" | "CN" | "HK" | "TW" | "GB" | "JP" | "DK" | "NL" | "DE" | "FR" | "CH" | "KR" | "IN" | "CA" | "AU" | "SG" | "IE" | "IT";
 
 export type Company = {
   id: string;               // slug, e.g. "nvidia"
@@ -20,9 +20,11 @@ export type Company = {
   yahooSymbol?: string;
   /** Curated, polished companies get a hero building in the country view */
   featured?: boolean;
-  /** Known xStocks mint (seed) so keyless discovery needs no search calls.
-   *  Verified 12 Sep 2026 via Jupiter Tokens v2; refreshed live when a key is set. */
+  /** xStocks mint from the issuer catalog (xstocks-catalog.ts), so keyless
+   *  discovery needs no search calls; refreshed live when a Jupiter key is set. */
   seedMint?: string;
+  /** Issuer icon URL from the xStocks catalog */
+  icon?: string;
 };
 
 export type TokenizedAsset = {

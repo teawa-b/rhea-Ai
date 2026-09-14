@@ -1,7 +1,7 @@
 /* Jupiter integration (spec §6.2): token discovery, onchain price, swap quotes,
  * execution, and the Trigger V2 proxy. Keyless requests go to lite-api.jup.ag;
  * with JUPITER_API_KEY we use api.jup.ag (Swap V2, stocks tag, Trigger). */
-import { COMPANIES, COMPANY_BY_TOKEN, USDC_MINT } from "../shared/registry";
+import { COMPANIES, COMPANY_BY_TOKEN, MIN_TRADABLE_LIQUIDITY_USD, USDC_MINT } from "../shared/registry";
 import type { TokenizedAsset, TradeQuote, TradeSide } from "../shared/types";
 
 const API_KEY = process.env.JUPITER_API_KEY || "";
@@ -35,8 +35,9 @@ type JupToken = {
 let assetCache: { at: number; assets: TokenizedAsset[] } | null = null;
 const ASSET_TTL_MS = 10 * 60_000;
 
-/** All tokenized equities we can place on the globe.
- *  - Keyless: registry seed mints + ONE batched Price v3 call (liquidity → tradable).
+/** All tokenized equities we can place on the globe — the full xStocks catalog
+ *  (~830 mints), each checked against Jupiter Price v3 for onchain liquidity.
+ *  - Keyless: catalog mints + batched Price v3 calls (liquidity → tradable).
  *  - With a key: the `stocks` tag refreshes metadata/discovers new listings. */
 export async function listTokenizedAssets(force = false): Promise<TokenizedAsset[]> {
   if (!force && assetCache && Date.now() - assetCache.at < ASSET_TTL_MS) return assetCache.assets;
@@ -53,7 +54,7 @@ export async function listTokenizedAssets(force = false): Promise<TokenizedAsset
   for (const co of COMPANIES) {
     const sym = co.tokenSymbol.toUpperCase();
     if (co.seedMint && !found.has(sym)) {
-      found.set(sym, { id: co.seedMint, name: `${co.name} xStock`, symbol: co.tokenSymbol, decimals: 8, tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", tags: ["xstocks", "stocks"] });
+      found.set(sym, { id: co.seedMint, name: `${co.name} xStock`, symbol: co.tokenSymbol, icon: co.icon, decimals: 8, tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", tags: ["xstocks", "stocks"] });
     }
   }
 
@@ -79,8 +80,9 @@ export async function listTokenizedAssets(force = false): Promise<TokenizedAsset
       name: t.name,
       issuer: "xStocks (Backed)",
       decimals: p?.decimals ?? t.decimals,
-      tradable: price > 0 && liquidity > 0,
-      icon: t.icon,
+      /* Dust pools (a few dollars) route nowhere — only real liquidity counts. */
+      tradable: price > 0 && liquidity >= MIN_TRADABLE_LIQUIDITY_USD,
+      icon: t.icon || company.icon,
       tokenProgram: t.tokenProgram,
       liquidityUsd: liquidity || undefined,
       holderCount: t.holderCount,
@@ -112,6 +114,8 @@ export async function getPrices(mints: string[]): Promise<Record<string, JupPric
   }
   for (let i = 0; i < missing.length; i += 50) {
     const batch = missing.slice(i, i + 50);
+    /* The catalog refresh is ~15 batches; pace them so the keyless lite API does not 429. */
+    if (i > 0 && !API_KEY) await new Promise((r) => setTimeout(r, 250));
     const data = await getJson<Record<string, JupPrice | null>>(`${BASE}/price/v3?ids=${batch.join(",")}`);
     for (const m of batch) {
       const p = data[m];
