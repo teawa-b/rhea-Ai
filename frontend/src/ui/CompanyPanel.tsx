@@ -9,6 +9,7 @@ import { useWorld } from "@/state/world";
 import { prepareTrade, prepareTrigger, describeRule } from "@/solana/trade";
 import { fmtAge, fmtPct, fmtUsd } from "@/theme";
 import { Chart } from "./Chart";
+import { CloseIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
 
 export function CompanyPanel({ companyId }: { companyId: string }) {
@@ -25,7 +26,6 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const impact = useWorld((s) => s.impact);
   const streetView = useWorld((s) => s.streetViewCompany);
   const showStreetView = useWorld((s) => s.showStreetView);
-  const resetGlobe = useWorld((s) => s.resetGlobe);
   const focusCountry = useWorld((s) => s.focusCountry);
 
   const [amount, setAmount] = useState(100);
@@ -88,10 +88,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           <h2>{co.name}</h2>
           <div className="sub">{co.ticker} · {co.tokenSymbol} · {co.sector} · {COUNTRIES[co.countryCode].name}</div>
         </div>
-        <div className="row">
-          <button className="btn ghost sm" onClick={() => focusCountry(co.countryCode)} title="Back to country">◂ {co.countryCode}</button>
-          <button className="btn ghost sm" onClick={() => resetGlobe(false)} title="World view">⌂</button>
-        </div>
+        <button className="icon-btn" onClick={() => focusCountry(co.countryCode)} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
       </div>
       <div className="panel-body scroll">
         {/* Prices */}
@@ -157,7 +154,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         <div className="divider" />
         <div className="hint" style={{ marginBottom: 6 }}>TRADE · Jupiter · Solana</div>
         {!auth.authenticated ? <div className="hint">Sign in to trade. Research stays available.</div> : null}
-        {auth.authenticated && !jurisdiction ? <div className="hint warn">Select your jurisdiction in the top bar.</div> : null}
+        {auth.authenticated && !jurisdiction ? <div className="hint warn">Choose your region in the top bar to trade.</div> : null}
         {detail && !tradable ? <div className="hint warn">Listed, but no onchain liquidity yet — trading disabled.</div> : null}
         <div className="row" style={{ marginTop: 6 }}>
           <input className="chip mono" type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 96 }} />

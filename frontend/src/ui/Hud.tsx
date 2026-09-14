@@ -10,6 +10,7 @@ import { useWorld } from "@/state/world";
 import { fmtPct, fmtUsd } from "@/theme";
 import { CompanyPanel } from "./CompanyPanel";
 import { CountryPanel } from "./CountryPanel";
+import { ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
 import { OrderPanel, TradePanel } from "./TradePanel";
 
@@ -58,16 +59,23 @@ export function Hud() {
   const countryHeat = useWorld((s) => s.countryHeat);
   const resetGlobe = useWorld((s) => s.resetGlobe);
   const focusCompany = useWorld((s) => s.focusCompany);
+  const focusCountry = useWorld((s) => s.focusCountry);
+  const panelReady = useWorld((s) => s.panelReady);
 
   const voiceState = useVoice((s) => s.state);
+  const inputMode = useVoice((s) => s.inputMode);
   const captions = useVoice((s) => s.captions);
   const voiceError = useVoice((s) => s.error);
+  const voiceNotice = useVoice((s) => s.notice);
   const muted = useVoice((s) => s.muted);
   const lastTool = useVoice((s) => s.lastTool);
   const connect = useVoice((s) => s.connect);
+  const switchToVoice = useVoice((s) => s.switchToVoice);
   const disconnect = useVoice((s) => s.disconnect);
   const toggleMute = useVoice((s) => s.toggleMute);
   const sendText = useVoice((s) => s.sendText);
+  const live = voiceState !== "off" && voiceState !== "error";
+  const textMode = live && inputMode === "text";
 
   const [text, setText] = useState("");
   const [xrMode, setXrMode] = useState<"immersive-ar" | "immersive-vr" | null>(null);
@@ -89,13 +97,29 @@ export function Hud() {
     const h = setTimeout(() => { setError(null); useVoice.setState({ error: null }); }, 7000);
     return () => clearTimeout(h);
   }, [lastError, voiceError, setError]);
+  useEffect(() => {
+    if (!voiceNotice) return;
+    const h = setTimeout(() => useVoice.setState({ notice: null }), 10000);
+    return () => clearTimeout(h);
+  }, [voiceNotice]);
 
   const onOrb = () => {
-    if (voiceState === "off" || voiceState === "error") void connect(auth);
+    if (!live) void connect(auth);
+    else if (textMode) { if (voiceState !== "connecting") void switchToVoice(auth); }
     else toggleMute();
   };
+  const orbTitle = !live ? "Start voice" : textMode ? "Use the microphone" : muted ? "Unmute" : "Mute";
+  const voiceTitle = voiceState === "off" ? "Rhea" : muted && !textMode ? "Muted" : textMode && voiceState === "idle" ? "Ready" : STATE_LABEL[voiceState];
+  const voiceSub = voiceState === "off" ? STATE_LABEL.off
+    : voiceState === "thinking" && lastTool ? lastTool.replace(/_/g, " ")
+    : voiceState === "error" ? (voiceError ?? "error")
+    : textMode ? "Text mode · tap to use mic"
+    : "Full-duplex · interrupt any time";
 
-  const showPanel = pendingTrade || pendingOrder || focusedCompany || focusedCountry || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry) || Object.keys(countryHeat).length > 0;
+  /* A focused place's panel waits until the camera has arrived (panelReady). */
+  const placePanel = panelReady && (focusedCompany || focusedCountry);
+  const showPanel = pendingTrade || pendingOrder || placePanel || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry) || Object.keys(countryHeat).length > 0;
+  const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
 
   return (
@@ -109,11 +133,16 @@ export function Hud() {
         <div className="topbar-right">
           <span className="chip sol" title={overview?.source}>
             <SolanaMark />
-            {overview ? `${overview.assets.length} tokenized stocks · ${overview.countries.length} countries · Solana` : "loading market…"}
+            {overview ? (
+              <>
+                <span className="long">{overview.assets.length} tokenized stocks · {overview.countries.length} countries · Solana</span>
+                <span className="short">{overview.assets.length} stocks · {overview.countries.length} countries</span>
+              </>
+            ) : "loading market…"}
           </span>
           {status && !status.openai ? <span className="chip dim" title="Set OPENAI_API_KEY on the server"><i className="dot err" />voice offline</span> : null}
-          <select className="chip clickable" value={jurisdiction ?? ""} onChange={(e) => setJurisdiction(e.target.value || null)} title="Your jurisdiction (compliance)">
-            <option value="">Jurisdiction…</option>
+          <select className="chip clickable" value={jurisdiction ?? ""} onChange={(e) => setJurisdiction(e.target.value || null)} title="Where you live. Some tokenized stocks aren't offered in every region." aria-label="Your region">
+            <option value="">Your region…</option>
             {JURISDICTIONS.map((j) => <option key={j.code} value={j.code}>{j.name}</option>)}
           </select>
           {auth.authenticated ? (
@@ -138,11 +167,20 @@ export function Hud() {
       <div className={`stage ${showPanel ? "" : "no-panel"}`}>
         <div className="left">
           {view !== "world" || comparison ? (
-            <div className="row" style={{ pointerEvents: "auto" }}>
-              <button className="btn ghost sm" onClick={() => resetGlobe(false)}>⌂ World</button>
-              {focusedCountry ? <span className="chip dim">{COUNTRIES[focusedCountry].name}</span> : null}
-              {focusedCompany ? <span className="chip">{COMPANY_BY_ID[focusedCompany]?.name}</span> : null}
-            </div>
+            <nav className="crumbs clickable" aria-label="Where you are">
+              <button className="crumb-back" onClick={goBack} title="Back" aria-label="Back"><ChevronLeftIcon size={16} /></button>
+              <button className="crumb" onClick={() => resetGlobe(false)}><GlobeIcon size={14} />World</button>
+              {focusedCountry ? (
+                <>
+                  <span className="crumb-sep" aria-hidden>›</span>
+                  {focusedCompany
+                    ? <button className="crumb" onClick={() => focusCountry(focusedCountry)}>{COUNTRIES[focusedCountry].name}</button>
+                    : <span className="crumb current" aria-current="page">{COUNTRIES[focusedCountry].name}</span>}
+                </>
+              ) : null}
+              {focusedCompany ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">{COMPANY_BY_ID[focusedCompany]?.name}</span></>) : null}
+              {comparison ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Compare</span></>) : null}
+            </nav>
           ) : null}
           <div className="captions scroll" ref={capRef} style={{ maxHeight: "34vh" }}>
             {captions.map((c) => (
@@ -177,8 +215,8 @@ export function Hud() {
                 </div>
               </div>
             ) : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && focusedCompany ? <CompanyPanel companyId={focusedCompany} /> : null}
-            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && !focusedCompany && focusedCountry ? <CountryPanel code={focusedCountry} /> : null}
+            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
+            {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
             {!pendingTrade && !pendingOrder && !showPortfolio && !comparison && !focusedCompany && !focusedCountry && (news || impact || heatEntries.length) ? (
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>{heatEntries.length ? "Portfolio geography" : news?.target ?? "Research"}</h2><div className="sub">{heatEntries.length ? "exposure by country" : "sources"}</div></div><button className="btn ghost sm" onClick={() => resetGlobe(true)}>✕</button></div>
@@ -196,20 +234,23 @@ export function Hud() {
       {/* ---------- bottom bar ---------- */}
       <div className="bottombar">
         <div className="voice clickable">
-          <div className={`orb ${voiceState}${muted ? " off" : ""}`} onClick={onOrb} title={voiceState === "off" ? "Start voice" : muted ? "Unmute" : "Mute"} />
-          <div className="label">
-            <b>{voiceState === "off" ? "Rhea" : muted ? "Muted" : STATE_LABEL[voiceState]}</b>
-            {voiceState === "off" ? STATE_LABEL.off : voiceState === "thinking" && lastTool ? lastTool.replace(/_/g, " ") : voiceState === "error" ? (voiceError ?? "error") : "Full-duplex · interrupt any time"}
+          <button type="button" className={`orb ${voiceState}${muted && !textMode ? " off" : ""}${!live ? " invite" : ""}`} onClick={onOrb} title={orbTitle} aria-label={orbTitle}>
+            {(muted && !textMode) || textMode ? <MicOffIcon size={20} /> : <MicIcon size={20} />}
+          </button>
+          <div className={`label${!live || textMode ? " tappable" : ""}`} onClick={!live || textMode ? onOrb : undefined}>
+            <b>{voiceTitle}</b>
+            {voiceSub}
           </div>
           {voiceState !== "off" && voiceState !== "connecting" ? <button className="btn ghost sm" onClick={disconnect}>End</button> : null}
         </div>
-        <form className="row clickable" onSubmit={(e) => { e.preventDefault(); if (!text.trim()) return; if (voiceState === "off") void connect(auth).then(() => setTimeout(() => sendText(text), 1500)); else sendText(text); setText(""); }}>
-          <input className="chip" style={{ width: "min(46vw, 420px)" }} placeholder={`Ask Rhea… e.g. "What's happening in China?"`} value={text} onChange={(e) => setText(e.target.value)} />
+        <form className="row clickable ask" onSubmit={(e) => { e.preventDefault(); const q = text.trim(); if (!q) return; sendText(q, auth); setText(""); }}>
+          <input className="chip ask-input" placeholder={`Ask Rhea… e.g. "What's happening in China?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />
           <button className="btn sm" type="submit">Ask</button>
         </form>
       </div>
 
-      {lastError || voiceError ? <div className="toast"><span className="chip"><i className="dot err" />{lastError ?? voiceError}</span></div> : null}
+      {lastError || voiceError ? <div className="toast"><span className="chip"><i className="dot err" />{lastError ?? voiceError}</span></div>
+        : voiceNotice ? <div className="toast"><span className="chip notice"><i className="dot warn" />{voiceNotice}</span></div> : null}
     </div>
   );
 }

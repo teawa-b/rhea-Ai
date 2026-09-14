@@ -47,9 +47,13 @@ type WorldState = {
   impact: ImpactAnalysis | null;
   comparison: Comparison;
   streetViewCompany: string | null;
+  /** False while the camera is still flying to a newly focused place; the side
+   * panel waits for arrival so the globe moves first and the panel follows. */
+  panelReady: boolean;
   /** Bumps whenever something the AI should know about changes (for UI context). */
   contextVersion: number;
 
+  revealPanel: () => void;
   focusCountry: (q: string) => CountryCode | null;
   focusCompany: (q: string) => string | null;
   resetGlobe: (clear?: boolean) => void;
@@ -71,6 +75,17 @@ type WorldState = {
 
 let idCounter = 0;
 const nextId = (p: string) => `${p}_${++idCounter}_${Date.now().toString(36)}`;
+
+/* The camera reveals the panel on arrival; this guarantees it appears even if
+ * the 3D scene never runs (no WebGL, lost context, paused frames). Longest
+ * flight is ~2.5 s. */
+const REVEAL_FALLBACK_MS = 3200;
+let revealTimer: ReturnType<typeof setTimeout> | undefined;
+const holdPanelUntilArrival = () => {
+  clearTimeout(revealTimer);
+  revealTimer = setTimeout(() => useWorld.getState().revealPanel(), REVEAL_FALLBACK_MS);
+  return false;
+};
 
 /** Resolve "Nvidia" / "China" / "TSMx" to a lat/lng + label. */
 export function resolvePlace(q: string): { lat: number; lng: number; label: string; kind: "country" | "company"; id: string } | null {
@@ -103,7 +118,10 @@ export const useWorld = create<WorldState>((set, get) => ({
   impact: null,
   comparison: null,
   streetViewCompany: null,
+  panelReady: true,
   contextVersion: 0,
+
+  revealPanel: () => { clearTimeout(revealTimer); set({ panelReady: true }); },
 
   focusCountry: (q) => {
     const cd = resolveCountry(q);
@@ -112,6 +130,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       view: "country",
       focusedCountry: cd.code,
       focusedCompany: null,
+      panelReady: s.view === "country" && s.focusedCountry === cd.code ? s.panelReady : holdPanelUntilArrival(),
       highlightedCountries: s.highlightedCountries.includes(cd.code) ? s.highlightedCountries : [...s.highlightedCountries, cd.code],
       comparison: null,
       streetViewCompany: null,
@@ -127,6 +146,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       view: "company",
       focusedCompany: co.id,
       focusedCountry: co.countryCode,
+      panelReady: s.view === "company" && s.focusedCompany === co.id ? s.panelReady : holdPanelUntilArrival(),
       highlightedCompanies: s.highlightedCompanies.includes(co.id) ? s.highlightedCompanies : [...s.highlightedCompanies, co.id],
       chartFocusTs: null,
       comparison: null,
@@ -136,16 +156,19 @@ export const useWorld = create<WorldState>((set, get) => ({
     return co.id;
   },
 
-  resetGlobe: (clear = false) =>
+  resetGlobe: (clear = false) => {
+    clearTimeout(revealTimer);
     set((s) => ({
       view: "world",
       focusedCountry: null,
       focusedCompany: null,
       comparison: null,
       streetViewCompany: null,
+      panelReady: true,
       ...(clear ? { highlightedCountries: [], highlightedCompanies: [], connections: [], countryHeat: {}, news: null, impact: null, chartEvents: [] } : {}),
       contextVersion: s.contextVersion + 1,
-    })),
+    }));
+  },
 
   highlightCountries: (qs) => {
     const codes = qs.map((q) => resolveCountry(q)?.code).filter(Boolean) as CountryCode[];
@@ -210,6 +233,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       view: "world",
       focusedCompany: null,
       focusedCountry: null,
+      panelReady: true,
       contextVersion: s.contextVersion + 1,
     }));
     return ids;

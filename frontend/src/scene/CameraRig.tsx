@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import { useWorld } from "@/state/world";
 import { clamp, damp } from "./geo";
-import { DIST, faceLatLng, releaseToWorld, rig } from "./rig";
+import { DIST, endFlight, flyTo, releaseToWorld, rig, stepFlight } from "./rig";
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const X_AXIS = new THREE.Vector3(1, 0, 0);
@@ -35,18 +35,21 @@ export function CameraRig({ children }: { children: ReactNode }) {
   const focusedCompany = useWorld((s) => s.focusedCompany);
   const comparison = useWorld((s) => s.comparison);
 
-  /* World-state → rig targets (the AI "moves the globe" through here). */
+  /* World-state → rig targets (the AI "moves the globe" through here).
+   * Focusing flies there first and only then reveals the side panel (the
+   * world store has a fallback timer if frames never run). */
   useEffect(() => {
-    if (view === "company" && focusedCompany) {
-      const co = COMPANY_BY_ID[focusedCompany];
-      const hq = co.headquarters ?? COUNTRIES[co.countryCode];
-      faceLatLng(hq.lat, hq.lng, DIST.company);
-      rig.targetOffsetX = -0.62;
-    } else if (view === "country" && focusedCountry) {
-      const cd = COUNTRIES[focusedCountry];
-      faceLatLng(cd.lat, cd.lng, DIST.country);
-      rig.targetOffsetX = -0.45;
-    } else if (comparison) {
+    const target = view === "company" && focusedCompany
+      ? { place: COMPANY_BY_ID[focusedCompany].headquarters ?? COUNTRIES[COMPANY_BY_ID[focusedCompany].countryCode], dist: DIST.company, offset: -0.62 }
+      : view === "country" && focusedCountry
+        ? { place: COUNTRIES[focusedCountry], dist: DIST.country, offset: -0.45 }
+        : null;
+    if (target) {
+      let stale = false;
+      flyTo(target.place.lat, target.place.lng, target.dist, target.offset, () => { if (!stale) useWorld.getState().revealPanel(); });
+      return () => { stale = true; };
+    }
+    if (comparison) {
       releaseToWorld();
       rig.targetOffsetX = -0.35;
       rig.autoRotate = false;
@@ -60,7 +63,13 @@ export function CameraRig({ children }: { children: ReactNode }) {
     const g = group.current;
     if (!g) return;
 
-    if (!rig.dragging) {
+    if (rig.dragging) endFlight();
+    /* Flights run on wall-clock time so they last the same on slow devices
+     * (the 0.05 s cap only protects the damping below). */
+    const flying = stepFlight(Math.min(0.25, rawDt));
+    if (flying) {
+      /* the flight owns yaw/pitch/dist/offset this frame */
+    } else if (!rig.dragging) {
       if (rig.tweening) {
         rig.yaw = damp(rig.yaw, rig.targetYaw, 4.2, dt);
         rig.pitch = damp(rig.pitch, rig.targetPitch, 4.2, dt);
@@ -78,8 +87,10 @@ export function CameraRig({ children }: { children: ReactNode }) {
         rig.targetYaw = rig.yaw; rig.targetPitch = rig.pitch;
       }
     }
-    rig.dist = damp(rig.dist, rig.targetDist, 3.6, dt);
-    rig.offsetX = damp(rig.offsetX, inXR ? 0 : rig.targetOffsetX, 4, dt);
+    if (!flying) {
+      rig.dist = damp(rig.dist, rig.targetDist, 3.6, dt);
+      rig.offsetX = damp(rig.offsetX, inXR ? 0 : rig.targetOffsetX, 4, dt);
+    }
 
     g.rotation.set(0, 0, 0);
     g.rotateOnWorldAxis(Y_AXIS, rig.yaw);

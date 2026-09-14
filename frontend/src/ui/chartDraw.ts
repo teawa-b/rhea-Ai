@@ -20,6 +20,8 @@ export type ChartDrawOpts = {
   ticker: string;
   /** Passthrough mode: no backdrop, heavier strokes, haloed text for legibility */
   ar?: boolean;
+  /** 0..1 draw-in progress: the series is revealed left to right, markers fade in last. */
+  reveal?: number;
 };
 
 const CY = "#3fe0ff", FR = "#8fe8ff", MG = "#ff2e88", GR = "#14F195", AM = "#ffb020", MUTED = "#8ea3bd";
@@ -87,7 +89,11 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
   const first = view[0].o, last = view[view.length - 1].c;
   const up = last >= first;
   const lineColor = up ? GR : MG;
+  const reveal = Math.min(1, Math.max(0, o.reveal ?? 1));
+  const overlayAlpha = Math.min(1, Math.max(0, (reveal - 0.8) / 0.2));
 
+  ctx.save();
+  if (reveal < 1) { ctx.beginPath(); ctx.rect(0, 0, padL + iw * reveal + 2, H); ctx.clip(); }
   if (o.mode === "line") {
     /* Gradient fill under the line */
     const grad = ctx.createLinearGradient(0, padT, 0, padT + ih);
@@ -116,8 +122,10 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
       ctx.fillRect(cx - bw / 2, top, bw, Math.max(1, bot - top));
     }
   }
+  ctx.restore();
 
   /* Event markers (labels stacked under the header so they never collide) */
+  ctx.globalAlpha = overlayAlpha;
   ctx.font = "600 10px Inter, system-ui, sans-serif";
   let evRow = 0;
   for (const ev of o.events) {
@@ -155,6 +163,7 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
     ctx.fillStyle = o.marketOpen ? CY : "#5b6d86";
     ctx.beginPath(); ctx.arc(x(tMax), y(last), 3.2, 0, Math.PI * 2); ctx.fill();
   }
+  ctx.globalAlpha = 1;
 
   /* Y labels */
   halo();

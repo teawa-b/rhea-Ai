@@ -159,7 +159,8 @@ export function marketRouter(): Router {
       jupiterKey: hasJupiterKey(),
       pythKey: hasPythKey(),
       streetView: Boolean(process.env.GOOGLE_MAPS_API_KEY),
-      rpc: RPC_URL.replace(/\/\/([^@]+)@/, "//***@"),
+      /* Host only: providers like Alchemy/Helius put the API key in the path or query. */
+      rpc: (() => { try { return new URL(RPC_URL).host; } catch { return "custom"; } })(),
       liveModel: process.env.OPENAI_LIVE_MODEL || "gpt-live-1",
       backendModel: process.env.OPENAI_BACKEND_MODEL || "gpt-5.6-terra",
     });

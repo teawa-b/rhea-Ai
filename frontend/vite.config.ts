@@ -35,9 +35,11 @@ export default defineConfig(({ command, mode }) => {
     server: {
       host: "0.0.0.0",
       port: 3000,
-      /* Local dev: the backend runs on :5050 (`npm run dev` in backend/). */
+      /* Local dev: the backend runs on :5050 (`npm run dev` in backend/).
+       * API_PROXY_TARGET in frontend/.env.development.local points it elsewhere,
+       * e.g. the deployed Railway backend. */
       proxy: {
-        "/api": { target: "http://127.0.0.1:5050", changeOrigin: true },
+        "/api": { target: loadEnv(mode, import.meta.dirname, "API_").API_PROXY_TARGET || "http://127.0.0.1:5050", changeOrigin: true },
       },
     },
     preview: { host: "0.0.0.0", port: 4173 },

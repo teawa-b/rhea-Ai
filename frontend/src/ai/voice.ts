@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import type { RheaAuth } from "@/auth/Auth";
 import { greetingFor } from "./greeting";
-import { LiveClient, type VoiceState } from "./liveClient";
+import { LiveClient, type InputMode, type VoiceState } from "./liveClient";
 import { createToolRunner } from "./toolRunner";
 import { describeWorld, useWorld } from "@/state/world";
 import { useMarket } from "@/state/market";
@@ -13,14 +13,22 @@ export type Caption = { id: string; role: "user" | "assistant"; text: string; at
 type VoiceStore = {
   client: LiveClient | null;
   state: VoiceState;
+  /** "text" when the session runs without a microphone (typed questions only). */
+  inputMode: InputMode;
   captions: Caption[];
   lastTool: string | null;
   error: string | null;
+  /** Non-fatal heads-up, e.g. the mic was blocked so Rhea switched to text mode. */
+  notice: string | null;
   muted: boolean;
-  connect: (auth: RheaAuth) => Promise<void>;
+  /** Starts a session: with the mic by default, or text-only (no mic prompt). */
+  connect: (auth: RheaAuth, input?: InputMode) => Promise<void>;
+  /** From text mode, reconnect with the mic and keep the conversation so far. */
+  switchToVoice: (auth: RheaAuth) => Promise<void>;
   disconnect: () => void;
   toggleMute: () => void;
-  sendText: (text: string) => void;
+  /** Sends typed text, opening a text-only session first if none is running. */
+  sendText: (text: string, auth?: RheaAuth) => void;
   announce: (text: string) => void;
   instruct: (text: string) => void;
   pushContext: () => void;
@@ -29,6 +37,8 @@ type VoiceStore = {
 let authRef: RheaAuth | null = null;
 let seq = 0;
 const TURN_GAP_MS = 2200;
+/* Typed questions sent before the session has started. */
+let queued: string[] = [];
 
 export const useVoice = create<VoiceStore>((set, get) => {
   const appendCaption = (role: Caption["role"], delta: string, forceNew = false) => {
@@ -46,45 +56,75 @@ export const useVoice = create<VoiceStore>((set, get) => {
     });
   };
 
+  const deliver = (client: LiveClient, text: string) => {
+    appendCaption("user", text, true);
+    client.sendText(text);
+  };
+
   return {
     client: null,
     state: "off",
+    inputMode: "mic",
     captions: [],
     lastTool: null,
     error: null,
+    notice: null,
     muted: false,
 
-    connect: async (auth) => {
+    connect: async (auth, input = "mic") => {
       authRef = auth;
       if (get().client) return;
-      const client = new LiveClient(
+      let client: LiveClient | null = null;
+      /* Ignore late events from a client that has since been replaced (e.g. switchToVoice). */
+      const current = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => { if (get().client === client) fn(...a); };
+      client = new LiveClient(
         {
-          onState: (state) => set({ state }),
-          onUserTranscript: (delta) => appendCaption("user", delta, delta.length > 40),
-          onAssistantTranscript: (delta) => appendCaption("assistant", delta),
-          onToolStart: (name) => set({ lastTool: name }),
-          onError: (message) => set({ error: message }),
-          onClosed: () => set({ client: null, state: "off" }),
+          onState: current((state: VoiceState) => set({ state })),
+          onUserTranscript: current((delta: string) => appendCaption("user", delta, delta.length > 40)),
+          onAssistantTranscript: current((delta: string) => appendCaption("assistant", delta)),
+          onToolStart: current((name: string) => set({ lastTool: name })),
+          onError: current((message: string) => set({ error: message })),
+          onMicUnavailable: current((message: string) => set({ notice: message, inputMode: "text" })),
+          onClosed: current(() => set({ client: null, state: "off" })),
         },
         createToolRunner(() => authRef!),
       );
-      set({ client, error: null });
+      const history = get().captions.filter((c) => c.text.trim()).map((c) => ({ role: c.role, text: c.text }));
+      set({ client, error: null, notice: null, inputMode: input });
       try {
-        await client.connect({ context: buildContext(auth) });
-        /* Greeting after session.started — poll ready since events are async. */
+        await client.connect({ context: buildContext(auth), history, input });
+        const live = client;
+        /* After session.started: answer queued typed questions, otherwise greet
+         * (unless resuming a conversation). Poll since events are async. */
         const started = Date.now();
         const wait = () => {
-          if (client.isConnected) { client.greet(greetingFor(auth)); return; }
+          if (get().client !== live) return;
+          if (live.isConnected) {
+            const pendingText = queued; queued = [];
+            if (pendingText.length) pendingText.forEach((t) => deliver(live, t));
+            else if (!history.length) live.greet(greetingFor(auth));
+            return;
+          }
           if (Date.now() - started < 8000) window.setTimeout(wait, 150);
+          else if (queued.length) { queued = []; set({ error: "Rhea didn't connect in time. Please ask again." }); }
         };
         wait();
       } catch (e) {
-        set({ client: null, state: "error", error: (e as Error).message });
+        queued = [];
+        if (get().client === client) set({ client: null, state: "error", error: (e as Error).message });
       }
+    },
+
+    switchToVoice: async (auth) => {
+      const old = get().client;
+      set({ client: null, state: "connecting", notice: null });
+      old?.close();
+      await get().connect(auth, "mic");
     },
 
     disconnect: () => {
       get().client?.close();
+      queued = [];
       set({ client: null, state: "off" });
     },
 
@@ -95,12 +135,12 @@ export const useVoice = create<VoiceStore>((set, get) => {
       set({ muted });
     },
 
-    sendText: (text) => {
+    sendText: (text, auth) => {
       const c = get().client;
-      if (!c?.isConnected) return;
-      appendCaption("user", text, true);
-      c.send({ type: "response.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
-      c.send({ type: "response.create" });
+      if (c?.isConnected) { deliver(c, text); return; }
+      queued.push(text);
+      const a = auth ?? authRef;
+      if (!c && a) void get().connect(a, "text");
     },
 
     announce: (text) => get().client?.announce(text),

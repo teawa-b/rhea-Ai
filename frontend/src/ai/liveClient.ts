@@ -12,6 +12,9 @@ import { apiUrl } from "@/market/api";
 
 export type VoiceState = "off" | "connecting" | "idle" | "listening" | "thinking" | "speaking" | "error";
 
+/** "mic" = the user's microphone; "text" = a silent input track (typed questions only). */
+export type InputMode = "mic" | "text";
+
 export type ToolExecutor = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
 export type LiveCallbacks = {
@@ -20,8 +23,17 @@ export type LiveCallbacks = {
   onAssistantTranscript?: (delta: string, startMs: number, endMs: number) => void;
   onToolStart?: (name: string, args: Record<string, unknown>) => void;
   onError?: (message: string) => void;
+  /** The mic was requested but is unavailable; the session continues in text mode. */
+  onMicUnavailable?: (message: string) => void;
   onClosed?: (usage: unknown) => void;
 };
+
+function micProblem(e: unknown): string {
+  const name = (e as { name?: string })?.name ?? "";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "No microphone found. Type your questions below.";
+  if (name === "NotReadableError" || name === "AbortError") return "Microphone is busy in another app. Type your questions below.";
+  return "Microphone blocked. Type your questions below, or allow the mic in your browser's site settings to talk.";
+}
 
 type ServerEvent = {
   type: string;
@@ -51,6 +63,7 @@ export class LiveClient {
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
   private mic: MediaStream | null = null;
+  private silence: AudioContext | null = null;
   private audio: HTMLAudioElement | null = null;
   private state: VoiceState = "off";
   private ready = false;
@@ -62,8 +75,15 @@ export class LiveClient {
   /* function calls collected per delegation (outer id) until the response completes */
   private pending = new Map<string, PendingCall[]>();
   private continued = new Set<string>();
+  /* Typed questions go straight to the Responses backend, which the live voice
+   * model does not narrate on its own — so their final text is handed back to
+   * it as commentary to speak. */
+  private typedTurnPending = false;
+  private typedDelegations = new Set<string>();
+  private responseText = new Map<string, string>();
   sessionId: string | null = null;
   muted = false;
+  inputMode: InputMode = "mic";
 
   constructor(private readonly cb: LiveCallbacks, private readonly execute: ToolExecutor) {}
 
@@ -76,7 +96,7 @@ export class LiveClient {
     this.cb.onState?.(s);
   }
 
-  async connect(opts: { context?: string; history?: { role: "user" | "assistant"; text: string }[] } = {}) {
+  async connect(opts: { context?: string; history?: { role: "user" | "assistant"; text: string }[]; input?: InputMode } = {}) {
     if (this.pc) return;
     this.closed = false;
     this.setState("connecting");
@@ -93,10 +113,8 @@ export class LiveClient {
         this.audio.play().catch(() => undefined);
       });
 
-      this.mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      for (const track of this.mic.getAudioTracks()) pc.addTrack(track, this.mic);
+      const input = await this.openInput(opts.input ?? "mic");
+      for (const track of input.getAudioTracks()) pc.addTrack(track, input);
 
       /* Create the channel BEFORE the offer so it is part of the SDP. */
       const dc = pc.createDataChannel("oai-events");
@@ -138,6 +156,35 @@ export class LiveClient {
     }
   }
 
+  /** The mic when asked for and available; otherwise a silent track, since the
+   * live session expects continuous input audio even when nobody speaks. */
+  private async openInput(want: InputMode): Promise<MediaStream> {
+    if (want === "mic") {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error("no mediaDevices"), { name: "SecurityError" });
+        this.mic = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        this.inputMode = "mic";
+        return this.mic;
+      } catch (e) {
+        console.warn("[live] microphone unavailable, continuing in text mode", e);
+        this.cb.onMicUnavailable?.(micProblem(e));
+      }
+    }
+    const ctx = new AudioContext();
+    void ctx.resume().catch(() => undefined);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const dest = ctx.createMediaStreamDestination();
+    osc.connect(gain).connect(dest);
+    osc.start();
+    this.silence = ctx;
+    this.inputMode = "text";
+    return dest.stream;
+  }
+
   /** Graceful close: ask for final usage, keep media alive until session.closed. */
   close() {
     if (!this.dc || this.dc.readyState !== "open" || !this.ready) { this.teardown(); this.setState("off"); return; }
@@ -149,12 +196,14 @@ export class LiveClient {
   private teardown() {
     if (this.contextTimer) window.clearTimeout(this.contextTimer);
     this.mic?.getTracks().forEach((t) => t.stop());
+    void this.silence?.close().catch(() => undefined);
     try { this.dc?.close(); } catch { /* ignore */ }
     try { this.pc?.close(); } catch { /* ignore */ }
     if (this.audio) { this.audio.srcObject = null; this.audio.remove(); }
-    this.pc = null; this.dc = null; this.mic = null; this.audio = null;
+    this.pc = null; this.dc = null; this.mic = null; this.silence = null; this.audio = null;
     this.ready = false; this.sessionId = null;
     this.pending.clear(); this.continued.clear();
+    this.typedTurnPending = false; this.typedDelegations.clear(); this.responseText.clear();
   }
 
   private fail(message: string) {
@@ -199,11 +248,18 @@ export class LiveClient {
     this.send({ type: "session.instructions.append", delegation_id: null, content: text.slice(0, 1800) });
   }
 
-  /** Typed text goes to the backend as a user message, then runs it. */
+  /** Typed text goes to the backend as a user message, then runs it. Its final
+   * answer is spoken via commentary once the response completes. */
   sendText(text: string) {
-    this.send({ type: "response.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
+    /* The voice model doesn't see backend items, so tell it what was typed —
+     * otherwise its quick acknowledgement guesses at the request. */
+    this.send({ type: "session.thinking.append", delegation_id: null, content: `The user just typed (instead of speaking): "${text.slice(0, 500)}". Your backend is handling it now; if you acknowledge, refer to exactly this request.` });
+    const sent = this.send({ type: "response.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
+    if (!sent) return false;
+    this.typedTurnPending = true;
     this.send({ type: "response.create" });
-    this.cb.onUserTranscript?.(text, -1, -1);
+    if (this.state === "idle" || this.state === "listening") this.setState("thinking");
+    return true;
   }
 
   setMuted(muted: boolean) {
@@ -247,7 +303,11 @@ export class LiveClient {
         break;
 
       case "session.delegation.created":
-        if (ev.delegation?.id) { this.pending.set(ev.delegation.id, []); this.continued.delete(ev.delegation.id); }
+        if (ev.delegation?.id) {
+          this.pending.set(ev.delegation.id, []);
+          this.continued.delete(ev.delegation.id);
+          if (this.typedTurnPending) { this.typedDelegations.add(ev.delegation.id); this.typedTurnPending = false; }
+        }
         if (this.state !== "speaking") this.setState("thinking");
         break;
 
@@ -275,6 +335,11 @@ export class LiveClient {
       case "response.created":
         if (!this.pending.has(delegationId)) this.pending.set(delegationId, []);
         this.continued.delete(delegationId);
+        this.responseText.delete(delegationId);
+        break;
+
+      case "response.output_text.delta":
+        if (ev.delta) this.responseText.set(delegationId, (this.responseText.get(delegationId) ?? "") + ev.delta);
         break;
 
       case "response.output_item.done": {
@@ -300,6 +365,7 @@ export class LiveClient {
 
       case "response.failed":
         this.pending.delete(delegationId);
+        if (this.typedDelegations.delete(delegationId)) this.announce("Tell the user briefly that you couldn't finish that request and ask them to try again.");
         if (this.state === "thinking") this.setState("idle");
         break;
 
@@ -313,6 +379,10 @@ export class LiveClient {
     const calls = this.pending.get(delegationId) ?? [];
     this.pending.set(delegationId, []);
     if (!calls.length) {
+      const answer = this.responseText.get(delegationId)?.trim();
+      if (this.typedDelegations.delete(delegationId) && answer) {
+        this.announce(`Tell the user this answer to their typed question, naturally and briefly: ${answer}`);
+      }
       if (this.state === "thinking") this.setState("idle");
       return;
     }

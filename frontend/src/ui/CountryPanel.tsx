@@ -5,6 +5,7 @@ import type { CountryCode } from "@shared/types";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { fmtPct, fmtUsd } from "@/theme";
+import { CloseIcon } from "./icons";
 import { NewsCards } from "./NewsCards";
 
 export function CountryPanel({ code }: { code: CountryCode }) {
@@ -38,7 +39,7 @@ export function CountryPanel({ code }: { code: CountryCode }) {
           <h2>{cd.name}</h2>
           <div className="sub">{cs?.assetCount ?? 0} tokenized assets · {cs?.tradableCount ?? 0} with liquidity{activeRules ? ` · ${activeRules} agent${activeRules > 1 ? "s" : ""} watching` : ""}</div>
         </div>
-        <button className="btn ghost sm" onClick={() => resetGlobe(false)}>⌂ World</button>
+        <button className="icon-btn" onClick={() => resetGlobe(false)} title="Close · back to world" aria-label="Close, back to world view"><CloseIcon size={16} /></button>
       </div>
       <div className="panel-body scroll">
         {portfolio ? <dl className="kv" style={{ marginBottom: 10 }}><dt>Your exposure here</dt><dd>{fmtUsd(exposure)} · {portfolio.totalValueUsd ? ((exposure / portfolio.totalValueUsd) * 100).toFixed(0) : 0}%</dd></dl> : null}
