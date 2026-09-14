@@ -1,0 +1,28 @@
+{
+  "name": "rhea-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Rhea API — owns every secret (OpenAI, Jupiter, Pyth, Google). Railway service with Root Directory = backend.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "cross-env NODE_ENV=production tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.99.0",
+    "cross-env": "^10.1.0",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "openai": "^7.15.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=22.6"
+  }
+}

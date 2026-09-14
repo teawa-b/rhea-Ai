@@ -1,5 +1,8 @@
 /* Rhea — curated company + country registry.
  *
+ * DUPLICATED in frontend/shared/ and backend/shared/ (they deploy separately).
+ * If you edit this file, copy it to the other folder too.
+ *
  * The registry maps tokenized equities (xStocks on Solana) to real-world
  * companies, sectors, countries and headquarters coordinates so the globe can
  * place them. Prices, availability and asset counts are NEVER taken from here

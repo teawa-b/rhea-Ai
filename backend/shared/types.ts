@@ -1,4 +1,6 @@
-/* Rhea — shared data model (spec §19). Imported by both server and client. */
+/* Rhea — shared data model (spec §19). Imported by both server and client.
+ * DUPLICATED in frontend/shared/ and backend/shared/ (they deploy separately).
+ * If you edit this file, copy it to the other folder too. */
 
 export type CountryCode =
   | "US" | "CN" | "HK" | "TW" | "GB" | "JP" | "DK" | "NL" | "DE" | "FR" | "CH" | "KR" | "IN" | "CA" | "AU" | "SG" | "IE";

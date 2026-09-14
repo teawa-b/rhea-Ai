@@ -3,7 +3,17 @@ import type {
   ChartHistory, ChartRange, Company, CorporateAction, EligibilityResult, MarketOverview, Portfolio, PriceSnapshot, TokenizedAsset, TradeQuote, AssetCapability,
 } from "@shared/types";
 
-async function j<T>(url: string, init?: RequestInit): Promise<T> {
+/* Where the API lives. Empty in local dev (Vite proxies /api → the backend);
+ * on Railway VITE_API_URL is the backend service URL. Forgiving of a missing https://,
+ * a trailing slash, or a trailing /api so a pasted URL just works. */
+const RAW_API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").trim();
+export const API_BASE = RAW_API_URL
+  ? (/^https?:\/\//i.test(RAW_API_URL) ? RAW_API_URL : `https://${RAW_API_URL}`).replace(/\/+$/, "").replace(/\/api$/i, "")
+  : "";
+export const apiUrl = (path: string) => `${API_BASE}${path}`;
+
+async function j<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = apiUrl(path);
   const r = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   const text = await r.text();
   let data: unknown = null;
@@ -37,5 +47,5 @@ export const api = {
     j<{ status: string; signature?: string; error?: string; code?: number }>("/api/market/execute", { method: "POST", body: JSON.stringify({ signedTransaction, requestId }) }),
   trigger: (step: "challenge" | "verify" | "vault" | "deposit" | "order" | "cancel" | "history", body: unknown, jwt?: string) =>
     j<Record<string, unknown>>(`/api/market/trigger/${step}`, { method: "POST", body: JSON.stringify(body ?? {}), headers: jwt ? { "x-trigger-jwt": jwt } : {} }),
-  streetViewUrl: (id: string) => `/api/market/streetview/${encodeURIComponent(id)}`,
+  streetViewUrl: (id: string) => apiUrl(`/api/market/streetview/${encodeURIComponent(id)}`),
 };

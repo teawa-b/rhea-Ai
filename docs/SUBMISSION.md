@@ -23,9 +23,9 @@
 - Video: (add)
 
 ## What to look at in the code
-- `shared/tools.ts` — the 25-tool AI system the backend model uses to control the world and prepare actions
-- `server/live.ts` + `server/prompts.ts` — GPT-Live-1 session with Responses delegation (gpt-5.6-terra + web search)
-- `src/ai/liveClient.ts` — WebRTC client, nested function-call handling, context sharing
-- `src/scene/` — procedural dot-matrix Earth, country pins, company spires, animated arcs, in-headset panels
-- `server/feeds.ts` — price-feed abstraction (Pyth Pro → Jupiter → Yahoo) with source + staleness on every number
-- `src/solana/trade.ts` — quote → confirm → sign → execute; Trigger V2 challenge → vault → deposit → order
+- `backend/shared/tools.ts` — the 25-tool AI system the backend model uses to control the world and prepare actions
+- `backend/src/live.ts` + `backend/src/prompts.ts` — GPT-Live-1 session with Responses delegation (gpt-5.6-terra + web search)
+- `frontend/src/ai/liveClient.ts` — WebRTC client, nested function-call handling, context sharing
+- `frontend/src/scene/` — procedural dot-matrix Earth, country pins, company spires, animated arcs, in-headset panels
+- `backend/src/feeds.ts` — price-feed abstraction (Pyth Pro → Jupiter → Yahoo) with source + staleness on every number
+- `frontend/src/solana/trade.ts` — quote → confirm → sign → execute; Trigger V2 challenge → vault → deposit → order

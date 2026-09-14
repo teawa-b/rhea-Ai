@@ -8,6 +8,7 @@
  * fetch data) and return `function_call_output` items, then `response.create`
  * to let the backend continue — exactly the flow in the delegation guide.
  */
+import { apiUrl } from "@/market/api";
 
 export type VoiceState = "off" | "connecting" | "idle" | "listening" | "thinking" | "speaking" | "error";
 
@@ -117,7 +118,7 @@ export class LiveClient {
       const sdp = pc.localDescription?.sdp;
       if (!sdp) throw new Error("Missing local SDP offer");
 
-      const res = await fetch("/api/live/session", {
+      const res = await fetch(apiUrl("/api/live/session"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sdp, context: opts.context ?? "", history: opts.history ?? [] }),

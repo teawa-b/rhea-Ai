@@ -35,12 +35,23 @@ Built for the [Stocklana hackathon](https://hackathons.solana.com/hackathons/sto
 | Portfolio | Solana RPC (`getParsedTokenAccountsByOwner`, SPL + Token-2022) | positions, USDC, SOL, country exposure |
 | Compliance | asset capability table + jurisdiction gate | illustrative, from the issuer's public terms; the AI cannot bypass it |
 
+## Repo layout
+
+```
+frontend/   Vite + React WebXR client      → Railway service "frontend"  (env: frontend/.env.example)
+backend/    Express API, owns all secrets  → Railway service "backend"   (env: backend/.env.example)
+docs/       submission notes
+```
+
+**Deploying? Follow [DEPLOY.md](DEPLOY.md).** Two services in one Railway project, with copy-paste variable blocks.
+
 ## Quick start
 
 ```bash
-npm install
-cp .env.example .env        # add at least OPENAI_API_KEY and VITE_PRIVY_APP_ID
-npm run dev                 # http://localhost:3000  (API on :5050, proxied)
+npm run install:all
+cp backend/.env.example backend/.env      # add at least OPENAI_API_KEY
+cp frontend/.env.example frontend/.env    # add VITE_PRIVY_APP_ID; leave VITE_API_URL empty locally
+npm run dev                               # http://localhost:3000  (API on :5050, proxied)
 ```
 
 Without any keys the globe, market data, charts and corporate actions still work (guest mode);
@@ -48,14 +59,16 @@ voice needs `OPENAI_API_KEY`, sign-in/trading needs `VITE_PRIVY_APP_ID`.
 
 ### Keys
 
-| Variable | Needed for | Where |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | Rhea's voice (GPT-Live-1 + Responses backend) | platform.openai.com — server only |
-| `VITE_PRIVY_APP_ID` | Sign-in + embedded Solana wallet | dashboard.privy.io → create app → enable Solana embedded wallets, Google + email login. Add your dev/prod origins to *Allowed origins*. |
-| `JUPITER_API_KEY` | Swap V2, Trigger V2 (real conditional orders), full `stocks` tag | portal.jup.ag (free tier is enough) |
-| `PYTH_PRO_API_KEY` | real-time equity feeds + OHLC history | docs.pyth.network/price-feeds/pro (optional; Yahoo fallback otherwise) |
-| `GOOGLE_MAPS_API_KEY` | Street View Static images of HQs | optional; restrict the key to the Street View Static API |
-| `SOLANA_RPC_URL` | portfolio reads | defaults to the public mainnet RPC; use a provider for reliability |
+| Variable | Lives in | Needed for | Where |
+| --- | --- | --- | --- |
+| `VITE_API_URL` | frontend | Pointing the deployed client at the Railway API | on Railway: `https://${{ backend.RAILWAY_PUBLIC_DOMAIN }}` (empty locally) |
+| `VITE_PRIVY_APP_ID` | frontend | Sign-in + embedded Solana wallet | dashboard.privy.io → create app → enable Solana embedded wallets, Google + email login. Add your dev/prod origins to *Allowed origins*. |
+| `OPENAI_API_KEY` | backend | Rhea's voice (GPT-Live-1 + Responses backend) | platform.openai.com |
+| `CORS_ORIGIN` | backend | Restricting which sites can call the API | on Railway: `https://${{ frontend.RAILWAY_PUBLIC_DOMAIN }}` |
+| `JUPITER_API_KEY` | backend | Swap V2, Trigger V2 (real conditional orders), full `stocks` tag | portal.jup.ag (free tier is enough) |
+| `PYTH_PRO_API_KEY` | backend | real-time equity feeds + OHLC history | docs.pyth.network/price-feeds/pro (optional; Yahoo fallback otherwise) |
+| `GOOGLE_MAPS_API_KEY` | backend | Street View Static images of HQs | optional; restrict the key to the Street View Static API |
+| `SOLANA_RPC_URL` | backend | portfolio reads | defaults to the public mainnet RPC; use a provider for reliability |
 
 ### On a Meta Quest — mixed reality
 
@@ -79,16 +92,11 @@ and only hero company markers render in-headset to stay inside Quest's draw-call
 desktop first (Privy's login is a web flow); the same wallet is used in the headset.
 
 On a desktop without WebXR, `localhost` gets a built-in Quest 3 emulator (IWER) so the MR layout can be
-previewed — `node scripts/qa-xr.mjs <name>` captures it headlessly.
+previewed — `node frontend/scripts/qa-xr.mjs <name>` captures it headlessly.
 
-### Deploy (single process)
+### Deploy
 
-```bash
-npm run build && npm start   # serves dist/ + API on $PORT
-```
-
-`railway.json` is included — `railway up` builds and deploys it with a health check on `/api/health`.
-Set the env vars from the table above in the service; `VITE_*` values must be present at build time.
+Two services (`frontend`, `backend`) in one Railway project. See **[DEPLOY.md](DEPLOY.md)**.
 
 ## Architecture
 
@@ -101,7 +109,7 @@ Quest / Browser
   │           └── function_call_output + response.create → backend continues
   └── Privy embedded Solana wallet (signTransaction / signMessage only)
 
-Express API (server/)                    secrets live here only
+Express API (backend/, Railway)         secrets live here only
   ├── POST /api/live/session             GPT-Live session w/ Responses delegation + tools + web_search
   ├── GET  /api/market/overview          countries + assets (Jupiter)
   ├── GET  /api/market/company/:id       prices (Pyth/Jupiter), corporate actions, capability
@@ -111,9 +119,9 @@ Express API (server/)                    secrets live here only
   └── POST /api/market/trigger/:step     Jupiter Trigger V2 proxy (challenge/verify/vault/deposit/order)
 ```
 
-Key files: `shared/tools.ts` (the AI tool system), `server/prompts.ts` (live + backend prompts),
-`src/ai/liveClient.ts` (GPT-Live WebRTC client), `src/ai/toolRunner.ts` (tool execution),
-`src/scene/*` (globe), `src/state/world.ts` (what the world shows), `src/solana/trade.ts` (trade + trigger flows).
+Key files: `backend/shared/tools.ts` (the AI tool system), `backend/src/prompts.ts` (live + backend prompts),
+`frontend/src/ai/liveClient.ts` (GPT-Live WebRTC client), `frontend/src/ai/toolRunner.ts` (tool execution),
+`frontend/src/scene/*` (globe), `frontend/src/state/world.ts` (what the world shows), `frontend/src/solana/trade.ts` (trade + trigger flows).
 
 ## Trust principles (spec §26) — how they are enforced
 
@@ -127,6 +135,6 @@ Key files: `shared/tools.ts` (the AI tool system), `server/prompts.ts` (live + b
 
 ## Scope notes
 
-- xStocks jurisdiction restrictions in `shared/registry.ts` are illustrative and must be confirmed against the issuer's terms before production.
+- xStocks jurisdiction restrictions in `backend/shared/registry.ts` (and its `frontend/shared/` copy) are illustrative and must be confirmed against the issuer's terms before production.
 - Without `JUPITER_API_KEY` conditional orders are recorded locally and labelled *simulated*; swaps still execute for real through Jupiter's keyless Ultra endpoint.
-- App state (orders, jurisdiction) is kept in `localStorage` for the hackathon; the spec's Postgres/Supabase layer is a straightforward swap behind `src/state/market.ts`.
+- App state (orders, jurisdiction) is kept in `localStorage` for the hackathon; the spec's Postgres/Supabase layer is a straightforward swap behind `frontend/src/state/market.ts`.

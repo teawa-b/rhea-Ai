@@ -2,54 +2,17 @@
   "name": "rhea",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
-  "description": "Rhea — AI-native spatial markets on Solana. WebXR globe + GPT-Live voice agent + xStocks trading via Jupiter.",
-  "scripts": {
-    "dev": "concurrently -k -n server,vite -c blue,magenta \"npm:dev:server\" \"npm:dev:vite\"",
-    "dev:https": "concurrently -k -n server,vite -c blue,magenta \"npm:dev:server\" \"npm:dev:vite -- --https\"",
-    "dev:vite": "vite --host 0.0.0.0",
-    "dev:server": "tsx watch server/index.ts",
-    "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "start": "cross-env NODE_ENV=production tsx server/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json"
-  },
-  "dependencies": {
-    "@privy-io/react-auth": "^3.42.0",
-    "@react-three/drei": "^10.7.8",
-    "@react-three/fiber": "^9.7.0",
-    "@react-three/xr": "^6.6.30",
-    "@solana-program/memo": "^0.13.1",
-    "@solana-program/system": "^0.14.1",
-    "@solana-program/token": "^0.16.1",
-    "@solana/kit": "^8.3.0",
-    "@solana/web3.js": "^1.99.0",
-    "bs58": "^6.0.0",
-    "dotenv": "^16.4.7",
-    "express": "^5.2.1",
-    "openai": "^7.15.0",
-    "react": "~19.2.6",
-    "react-dom": "~19.2.6",
-    "three": "^0.186.0",
-    "topojson-client": "^3.1.0",
-    "world-atlas": "^2.0.2",
-    "zustand": "^5.0.15"
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.0",
-    "@types/node": "^24.0.0",
-    "@types/react": "^19.2.15",
-    "@types/react-dom": "^19.2.3",
-    "@types/three": "^0.186.0",
-    "@types/topojson-client": "^3.1.5",
-    "@vitejs/plugin-basic-ssl": "^2.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
-    "concurrently": "^9.1.0",
-    "cross-env": "^10.1.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.9.0",
-    "vite": "^8.3.0"
-  },
+  "description": "Local-dev helper only. frontend/ and backend/ deploy as two services in one Railway project — see DEPLOY.md.",
   "engines": {
     "node": ">=22.6"
+  },
+  "scripts": {
+    "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "dev": "concurrently -k -n backend,frontend -c blue,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev:https": "concurrently -k -n backend,frontend -c blue,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev:https\"",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
   }
 }
