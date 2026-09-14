@@ -1,28 +1,70 @@
 import type { ImpactAnalysis, NewsEvent } from "@shared/types";
 import { COMPANY_BY_ID } from "@shared/registry";
 import { useWorld } from "@/state/world";
+import { useState } from "react";
+import { logoUrl } from "@/market/logos";
 import { fmtAge } from "@/theme";
 
-export function NewsCards({ items }: { items: NewsEvent[] }) {
+function hostOf(url: string) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
+}
+
+/** Source badge: the site's favicon, falling back to a gradient monogram. */
+function SourceBadge({ source, url }: { source: string; url: string }) {
+  const [failed, setFailed] = useState(false);
+  const host = hostOf(url);
+  if (!host || failed) return <span className="nw-badge mono-badge" aria-hidden>{(source || host || "?").slice(0, 1).toUpperCase()}</span>;
+  return <img className="nw-badge" src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`} alt="" loading="lazy" onError={() => setFailed(true)} />;
+}
+
+function NewsCard({ n, hidden }: { n: NewsEvent; hidden?: boolean }) {
   const addChartEvent = useWorld((s) => s.addChartEvent);
   const focusChartTimestamp = useWorld((s) => s.focusChartTimestamp);
+  const dated = Number.isFinite(Date.parse(n.publishedAt));
+  const logos = n.companyIds.map((id) => ({ id, url: logoUrl(id), co: COMPANY_BY_ID[id] })).filter((x) => x.co).slice(0, 3);
   return (
-    <div className="news">
-      {items.map((n) => (
-        <a key={n.id} className="card" href={n.url} target="_blank" rel="noreferrer noopener">
-          <div className="title">{n.title}</div>
-          <div className="meta">
-            {n.source} · {Number.isFinite(Date.parse(n.publishedAt)) ? `${new Date(n.publishedAt).toLocaleDateString()} · ${fmtAge(n.publishedAt)}` : n.publishedAt}
-            {n.companyIds[0] && Number.isFinite(Date.parse(n.publishedAt)) ? (
-              <button className="btn ghost sm" style={{ marginLeft: 8, padding: "2px 6px" }} onClick={(e) => { e.preventDefault(); const ts = Date.parse(n.publishedAt); addChartEvent({ companyId: n.companyIds[0], timestamp: ts, title: n.title, kind: "news", url: n.url }); focusChartTimestamp(ts); }}>
-                ⌖ chart
-              </button>
-            ) : null}
-          </div>
-          {n.summary ? <div className="summary">{n.summary}</div> : null}
-        </a>
-      ))}
-    </div>
+    <a className="nw-card" href={n.url} target="_blank" rel="noreferrer noopener" aria-hidden={hidden || undefined} tabIndex={hidden ? -1 : undefined}>
+      <div className="nw-top">
+        <SourceBadge source={n.source} url={n.url} />
+        <span className="nw-source">{n.source || hostOf(n.url)}</span>
+        {dated ? <span className="nw-age">{fmtAge(n.publishedAt)}</span> : null}
+      </div>
+      <div className="nw-title">{n.title}</div>
+      {n.summary ? <div className="nw-summary">{n.summary}</div> : null}
+      <div className="nw-foot">
+        {logos.map((l) => l.url
+          ? <img key={l.id} className="nw-co" src={l.url} alt={l.co.name} title={l.co.name} />
+          : <span key={l.id} className="nw-co tick">{l.co.ticker}</span>)}
+        <span className="spacer" />
+        {n.companyIds[0] && dated ? (
+          <button className="nw-chart" tabIndex={hidden ? -1 : undefined} onClick={(e) => { e.preventDefault(); const ts = Date.parse(n.publishedAt); addChartEvent({ companyId: n.companyIds[0], timestamp: ts, title: n.title, kind: "news", url: n.url }); focusChartTimestamp(ts); }}>
+            ⌖ on chart
+          </button>
+        ) : <span className="nw-open">read ↗</span>}
+      </div>
+    </a>
+  );
+}
+
+/** News as a slow left-to-right carousel (pauses on hover / focus). */
+export function NewsCards({ items, label }: { items: NewsEvent[]; /** e.g. a country name shown in the header */ label?: string }) {
+  const sources = new Set(items.map((n) => n.source || hostOf(n.url))).size;
+  const loop = items.length > 1;
+  /* Seconds per card keeps the pace the same however many stories there are. */
+  const duration = `${Math.max(18, items.length * 9)}s`;
+  return (
+    <section className="nw" aria-label="News">
+      <header className="nw-head">
+        <span className="nw-live"><i />Live wire{label ? ` · ${label}` : ""}</span>
+        <span className="nw-count">{items.length} {items.length === 1 ? "story" : "stories"} · {sources} {sources === 1 ? "source" : "sources"}</span>
+      </header>
+      <div className={`nw-viewport${loop ? " loop" : ""}`}>
+        <div className="nw-track" style={{ animationDuration: duration }}>
+          {items.map((n) => <NewsCard key={n.id} n={n} />)}
+          {loop ? items.map((n) => <NewsCard key={`${n.id}-dup`} n={n} hidden />) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 

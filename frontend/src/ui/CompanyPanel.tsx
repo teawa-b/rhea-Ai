@@ -195,7 +195,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
 
         {/* News + impact */}
         {impact && impact.companyId === co.id ? (<><div className="divider" /><ImpactCard impact={impact} /></>) : null}
-        {companyNews.length ? (<><div className="divider" /><div className="hint" style={{ marginBottom: 6 }}>{countryNews ? `NEWS · ${COUNTRIES[co.countryCode].name}` : "NEWS · sources"}</div><NewsCards items={companyNews} /></>) : null}
+        {companyNews.length ? (<><div className="divider" /><NewsCards items={companyNews} label={countryNews ? COUNTRIES[co.countryCode].name : co.ticker} /></>) : null}
       </div>
     </div>
   );

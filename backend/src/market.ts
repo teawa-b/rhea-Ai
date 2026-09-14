@@ -17,7 +17,6 @@ const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
 const TOKEN_2022_PROGRAM = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 const conn = new Connection(RPC_URL, "confirmed");
-const logoCache = new Map<string, { type: string; body: Buffer }>();
 
 function bad(res: Response, status: number, message: string) {
   res.status(status).json({ error: message });
@@ -262,30 +261,6 @@ export function marketRouter(): Router {
   });
 
   /* Street View Static (spec §4). Key stays server-side; the image is proxied. */
-  /* Company logo, re-served with CORS so the globe can use it as a WebGL
-   * texture (the issuer's CDN sends no Access-Control-Allow-Origin). Only
-   * catalog icons are fetched, so this is not an open proxy. */
-  r.get("/logo/:id", async (req, res) => {
-    const co = COMPANY_BY_ID[String(req.params.id)];
-    const url = co?.icon;
-    if (!url || !url.startsWith("https://xstocks-metadata.backed.fi/")) return bad(res, 404, "No logo");
-    try {
-      let hit = logoCache.get(url);
-      if (!hit) {
-        const img = await fetch(url);
-        if (!img.ok) return bad(res, 404, "Logo unavailable");
-        hit = { type: img.headers.get("content-type") ?? "image/png", body: Buffer.from(await img.arrayBuffer()) };
-        if (logoCache.size > 400) logoCache.clear();
-        logoCache.set(url, hit);
-      }
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Content-Type", hit.type);
-      res.setHeader("Cache-Control", "public, max-age=86400");
-      res.send(hit.body);
-    } catch (e) { bad(res, 502, (e as Error).message); }
-  });
-
   r.get("/streetview/:id", async (req, res) => {
     const co = COMPANY_BY_ID[String(req.params.id)];
     if (!co?.headquarters) return bad(res, 404, "No headquarters location");

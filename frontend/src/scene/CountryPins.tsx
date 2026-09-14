@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { COMPANY_BY_ID } from "@shared/registry";
 import type { CountrySummary } from "@shared/types";
 import { C, assetTint, fmtPct, fmtUsd } from "@/theme";
-import { api } from "@/market/api";
+import { logoUrl } from "@/market/logos";
 import { useMarket } from "@/state/market";
 import { REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
@@ -207,7 +207,7 @@ function RegionTickers({ regionId, countries }: { regionId: string; countries: C
               accent={accent}
               scale={0.46}
               dim={!isLive}
-              icon={co.icon ? api.logoUrl(co.id) : undefined}
+              icon={logoUrl(co.id)}
               onClick={() => focusCompany(c.id)}
             />
           </group>

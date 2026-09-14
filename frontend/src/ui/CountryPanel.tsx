@@ -63,7 +63,7 @@ export function CountryPanel({ code }: { code: CountryCode }) {
             );
           })}
         </div>
-        {countryNews.length ? (<><div className="divider" /><div className="hint" style={{ marginBottom: 6 }}>NEWS · {cd.name}</div><NewsCards items={countryNews} /></>) : null}
+        {countryNews.length ? (<><div className="divider" /><NewsCards items={countryNews} label={cd.name} /></>) : null}
       </div>
     </div>
   );
