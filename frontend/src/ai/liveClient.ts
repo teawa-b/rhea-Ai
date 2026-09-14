@@ -63,6 +63,7 @@ export class LiveClient {
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
   private mic: MediaStream | null = null;
+  private sender: RTCRtpSender | null = null;
   private silence: AudioContext | null = null;
   private audio: HTMLAudioElement | null = null;
   private state: VoiceState = "off";
@@ -113,8 +114,13 @@ export class LiveClient {
         this.audio.play().catch(() => undefined);
       });
 
+      /* A dropped transport (e.g. the headset slept) can't recover on its own. */
+      pc.addEventListener("connectionstatechange", () => {
+        if (this.pc === pc && !this.closed && (pc.connectionState === "failed" || pc.connectionState === "closed")) this.fail("Voice connection lost");
+      });
+
       const input = await this.openInput(opts.input ?? "mic");
-      for (const track of input.getAudioTracks()) pc.addTrack(track, input);
+      for (const track of input.getAudioTracks()) this.sender = pc.addTrack(track, input);
 
       /* Create the channel BEFORE the offer so it is part of the SDP. */
       const dc = pc.createDataChannel("oai-events");
@@ -125,9 +131,12 @@ export class LiveClient {
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      /* Host candidates arrive within milliseconds; waiting for "complete" can
+       * stall for seconds on some networks (Quest Wi-Fi), delaying the greeting.
+       * Send what we have after a short cap. */
       if (pc.iceGatheringState !== "complete") {
-        await new Promise<void>((resolve, reject) => {
-          const timeout = window.setTimeout(() => { pc.removeEventListener("icegatheringstatechange", on); reject(new Error("ICE gathering timed out")); }, 10_000);
+        await new Promise<void>((resolve) => {
+          const timeout = window.setTimeout(() => { pc.removeEventListener("icegatheringstatechange", on); resolve(); }, 1200);
           const on = () => { if (pc.iceGatheringState !== "complete") return; window.clearTimeout(timeout); pc.removeEventListener("icegatheringstatechange", on); resolve(); };
           pc.addEventListener("icegatheringstatechange", on);
           on();
@@ -185,6 +194,37 @@ export class LiveClient {
     return dest.stream;
   }
 
+  /** False once the transport or data channel has dropped (e.g. the headset slept). */
+  get healthy() {
+    if (!this.pc) return false;
+    const cs = this.pc.connectionState;
+    if (cs === "failed" || cs === "closed") return false;
+    return !this.ready || this.dc?.readyState === "open";
+  }
+
+  /** After sleep / wake the OS ends the mic track while the session lives on:
+   * grab a fresh one and swap it into the same sender. Also restarts playback. */
+  async reviveMedia(): Promise<boolean> {
+    if (this.audio?.paused && this.audio.srcObject) this.audio.play().catch(() => undefined);
+    if (this.inputMode !== "mic" || !this.sender) return true;
+    const track = this.mic?.getAudioTracks()[0];
+    if (track && track.readyState === "live") return true;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      const next = fresh.getAudioTracks()[0];
+      next.enabled = !this.muted;
+      await this.sender.replaceTrack(next);
+      this.mic?.getTracks().forEach((t) => t.stop());
+      this.mic = fresh;
+      return true;
+    } catch (e) {
+      console.warn("[live] could not reacquire the microphone", e);
+      return false;
+    }
+  }
+
   /** Graceful close: ask for final usage, keep media alive until session.closed. */
   close() {
     if (!this.dc || this.dc.readyState !== "open" || !this.ready) { this.teardown(); this.setState("off"); return; }
@@ -200,7 +240,7 @@ export class LiveClient {
     try { this.dc?.close(); } catch { /* ignore */ }
     try { this.pc?.close(); } catch { /* ignore */ }
     if (this.audio) { this.audio.srcObject = null; this.audio.remove(); }
-    this.pc = null; this.dc = null; this.mic = null; this.silence = null; this.audio = null;
+    this.pc = null; this.dc = null; this.mic = null; this.sender = null; this.silence = null; this.audio = null;
     this.ready = false; this.sessionId = null;
     this.pending.clear(); this.continued.clear();
     this.typedTurnPending = false; this.typedDelegations.clear(); this.responseText.clear();
@@ -221,10 +261,11 @@ export class LiveClient {
 
   /* ---------------- Steering ---------------- */
 
-  /** Ask Rhea to greet first (docs: instructions.append + short commentary nudge). */
+  /** Ask Rhea to greet first. One commentary item carrying the greeting itself
+   * starts speech straight away; appending it to the standing instructions
+   * first made her wait on a second nudge (and left "greet now" in them). */
   greet(instruction: string) {
-    this.send({ type: "session.instructions.append", delegation_id: null, content: instruction });
-    this.send({ type: "session.commentary.append", delegation_id: null, content: "Begin the conversation now, following the instructions provided." });
+    this.send({ type: "session.commentary.append", delegation_id: null, content: instruction });
   }
 
   /** Quiet UI-context update for the live model (debounced, skips unchanged). */

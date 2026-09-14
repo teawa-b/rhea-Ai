@@ -9,7 +9,7 @@ import { XR, createXRStore, useXR } from "@react-three/xr";
 import { Suspense, useEffect } from "react";
 import * as THREE from "three";
 import { C } from "@/theme";
-import { CameraRig } from "./CameraRig";
+import { CameraRig, XrHeadAnchor } from "./CameraRig";
 import { CompanyMarkers } from "./CompanyMarkers";
 import { Connections } from "./Connections";
 import { CountryPins } from "./CountryPins";
@@ -84,13 +84,15 @@ export function RheaScene() {
         <directionalLight position={[-2.4, 1.8, 3.2]} intensity={2.0} color="#f4f9ff" />
         <directionalLight position={[2.6, -1.2, 0.8]} intensity={0.9} color={C.sol} />
         <Suspense fallback={null}>
-          <CameraRig>
-            <Globe />
-            <CountryPins />
-            <CompanyMarkers />
-            <Connections />
-          </CameraRig>
-          <XRPanels />
+          <XrHeadAnchor>
+            <CameraRig>
+              <Globe />
+              <CountryPins />
+              <CompanyMarkers />
+              <Connections />
+            </CameraRig>
+            <XRPanels />
+          </XrHeadAnchor>
         </Suspense>
       </XR>
     </Canvas>

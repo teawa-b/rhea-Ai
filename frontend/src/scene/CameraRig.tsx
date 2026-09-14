@@ -33,12 +33,14 @@ const IDLE_AFTER = 2.2;      // s before drift resumes
 export const XR_ANCHOR = new THREE.Vector3(-0.5, 1.3, -1.55);
 export const XR_BASE_SCALE = 0.36;
 /* Surface focal point + scale per state (metres, local-floor space). */
-const XR_FOCAL_WORLD = new THREE.Vector3(-0.38, 1.36, -1.2);
+const XR_FOCAL_WORLD = new THREE.Vector3(-0.24, 1.32, -1.15);
 const XR_FOCAL_NEAR = new THREE.Vector3(-0.34, 1.46, -0.9);
 const XR_FOCAL_CHART = new THREE.Vector3(-0.72, 1.16, -1.25);
 const XR_SCALE_NEAR = 0.54;
 const XR_SCALE_CHART = 0.26;
-/* Where the head is assumed to be until the first XR frame reports it. */
+/* The head pose every layout constant above is authored against. XrHeadAnchor
+ * moves that frame onto the user's real head at session start, so the planet
+ * lands in front of them whether they stand, sit, or start off-centre. */
 const XR_HEAD_FALLBACK = new THREE.Vector3(0, 1.5, 0);
 const easeInOut = (t: number) => t * t * (3 - 2 * t);
 
@@ -53,6 +55,36 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _zero = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
+
+const _fwd = new THREE.Vector3();
+const headAnchor = { frames: 0, locked: false };
+
+/** Re-seat the headset layout in front of the user's current head pose. */
+export function recenterXR() { headAnchor.frames = 0; headAnchor.locked = false; }
+
+/** Wraps all in-headset content. Outside XR it is the identity. On entering a
+ * session it follows the head for a few frames (tracking settles), then locks:
+ * position under the head and yaw toward where the user is looking. */
+export function XrHeadAnchor({ children }: { children: ReactNode }) {
+  const ref = useRef<THREE.Group>(null);
+  const { camera } = useThree();
+  const inXR = useXR((s) => s.mode) != null;
+  useEffect(() => { recenterXR(); }, [inXR]);
+  useFrame(() => {
+    const g = ref.current;
+    if (!g) return;
+    if (!inXR) { g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); return; }
+    if (headAnchor.locked) return;
+    camera.getWorldPosition(_head);
+    if (!Number.isFinite(_head.x) || _head.lengthSq() < 1e-6) return;
+    camera.getWorldDirection(_fwd);
+    /* Looking nearly straight up/down gives no heading; keep the last one. */
+    if (Math.hypot(_fwd.x, _fwd.z) > 0.2) g.rotation.set(0, Math.atan2(-_fwd.x, -_fwd.z), 0);
+    g.position.set(_head.x, _head.y - XR_HEAD_FALLBACK.y, _head.z);
+    if (++headAnchor.frames > 30) headAnchor.locked = true;
+  });
+  return <group ref={ref}>{children}</group>;
+}
 
 export function CameraRig({ children }: { children: ReactNode }) {
   const group = useRef<THREE.Group>(null);
@@ -145,6 +177,7 @@ export function CameraRig({ children }: { children: ReactNode }) {
       /* The headset camera is the head: turn the focused spot toward it. */
       camera.getWorldPosition(_head);
       if (!Number.isFinite(_head.x) || _head.lengthSq() < 1e-6) _head.copy(XR_HEAD_FALLBACK);
+      else if (g.parent) g.parent.worldToLocal(_head);
       _dir.subVectors(_head, _focal).normalize();
       x.dir.x = damp(x.dir.x, _dir.x, 3, dt); x.dir.y = damp(x.dir.y, _dir.y, 3, dt); x.dir.z = damp(x.dir.z, _dir.z, 3, dt);
       x.dir.normalize();

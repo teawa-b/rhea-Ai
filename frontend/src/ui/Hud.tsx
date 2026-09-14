@@ -234,7 +234,7 @@ export function Hud() {
       {/* ---------- bottom bar ---------- */}
       <div className="bottombar">
         <div className="voice clickable">
-          <button type="button" className={`orb ${voiceState}${muted && !textMode ? " off" : ""}${!live ? " invite" : ""}`} onClick={onOrb} title={orbTitle} aria-label={orbTitle}>
+          <button type="button" className={`orb ${voiceState}${muted && !textMode ? " off" : ""}${!live ? " invite" : ""}${live && !textMode && !muted && voiceState !== "connecting" ? " mic-hot" : ""}`} onClick={onOrb} title={orbTitle} aria-label={orbTitle}>
             {(muted && !textMode) || textMode ? <MicOffIcon size={20} /> : <MicIcon size={20} />}
           </button>
           <div className={`label${!live || textMode ? " tappable" : ""}`} onClick={!live || textMode ? onOrb : undefined}>

@@ -19,7 +19,7 @@ import { useVoice } from "@/ai/voice";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { confirmTrade, confirmTrigger, describeIntent, describeRule, isGated, prepareTrade, prepareTrigger } from "@/solana/trade";
-import { xrGlobe } from "./CameraRig";
+import { recenterXR, xrGlobe } from "./CameraRig";
 import { C, fmtPct, fmtUsd } from "@/theme";
 import { drawChart } from "@/ui/chartDraw";
 
@@ -372,11 +372,59 @@ function VoiceOrb() {
     (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity = state === "speaking" ? 2.2 : state === "thinking" ? 1.4 : holding ? 2 : 0.6;
   });
   const color = holding ? C.violet : state === "thinking" ? C.amber : state === "error" ? C.red : state === "off" ? C.steel : C.sol;
+  /* The mic is hot only while the talk button is held on a live session. */
+  const micHot = holding && state !== "off" && state !== "error" && state !== "connecting";
   return (
     <group ref={anchor}>
       <mesh ref={ref} onPointerDown={(e) => { e.stopPropagation(); setHold(true, auth); }} onPointerUp={(e) => { e.stopPropagation(); setHold(false); }} onPointerOut={() => setHold(false)}>
         <sphereGeometry args={[0.04, 24, 18]} />
         <meshStandardMaterial color={new THREE.Color(color).multiplyScalar(0.3)} emissive={color} emissiveIntensity={1} roughness={0.3} />
+        <MicGlyph hot={micHot} />
+      </mesh>
+    </group>
+  );
+}
+
+const NO_RAYCAST = () => null;
+
+/** Mic symbol drawn on the front of the voice orb: red while the mic is open, grey when closed. */
+function MicGlyph({ hot }: { hot: boolean }) {
+  const color = hot ? "#ff3b4e" : "#8a94a3";
+  const mat = <meshBasicMaterial color={color} toneMapped={false} depthTest={false} transparent />;
+  const halo = useRef<THREE.Mesh>(null);
+  useFrame((s) => {
+    if (!halo.current) return;
+    const m = halo.current.material as THREE.MeshBasicMaterial;
+    m.opacity = hot ? 0.35 + Math.sin(s.clock.elapsedTime * 8) * 0.15 : 0;
+  });
+  return (
+    <group position={[0, 0, 0.041]} renderOrder={10}>
+      <mesh raycast={NO_RAYCAST} renderOrder={10}>
+        <circleGeometry args={[0.028, 32]} />
+        <meshBasicMaterial color="#05060d" transparent opacity={0.72} toneMapped={false} depthTest={false} />
+      </mesh>
+      <mesh ref={halo} raycast={NO_RAYCAST} renderOrder={11}>
+        <ringGeometry args={[0.028, 0.033, 40]} />
+        <meshBasicMaterial color="#ff3b4e" transparent opacity={0} toneMapped={false} depthTest={false} />
+      </mesh>
+      {/* capsule head */}
+      <mesh raycast={NO_RAYCAST} renderOrder={12} position={[0, 0.006, 0.001]}>
+        <capsuleGeometry args={[0.0065, 0.012, 6, 16]} />
+        {mat}
+      </mesh>
+      {/* cradle */}
+      <mesh raycast={NO_RAYCAST} renderOrder={12} position={[0, 0.004, 0.001]} rotation={[0, 0, Math.PI]}>
+        <torusGeometry args={[0.0125, 0.0018, 8, 24, Math.PI]} />
+        {mat}
+      </mesh>
+      {/* stem + base */}
+      <mesh raycast={NO_RAYCAST} renderOrder={12} position={[0, -0.0125, 0.001]}>
+        <boxGeometry args={[0.0028, 0.008, 0.001]} />
+        {mat}
+      </mesh>
+      <mesh raycast={NO_RAYCAST} renderOrder={12} position={[0, -0.0168, 0.001]}>
+        <boxGeometry args={[0.014, 0.0026, 0.001]} />
+        {mat}
       </mesh>
     </group>
   );
@@ -398,7 +446,8 @@ function XRButtons() {
     const a = gp?.["a-button"] ? gp["a-button"].state === "pressed" : Boolean(buttons?.[4]?.pressed);
     const b = gp?.["b-button"] ? gp["b-button"].state === "pressed" : Boolean(buttons?.[5]?.pressed);
     if (a !== was.current.a) useVoice.getState().setHold(a, auth);
-    if (b && !was.current.b) useWorld.getState().resetGlobe(false);
+    /* B also re-seats the planet in front of wherever the user now is. */
+    if (b && !was.current.b) { useWorld.getState().resetGlobe(false); recenterXR(); }
     was.current = { a, b };
   });
   return null;

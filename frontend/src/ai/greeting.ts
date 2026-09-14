@@ -17,5 +17,5 @@ export function greetingFor(auth: RheaAuth) {
   }
   const countries = m.overview?.countries.length ?? 0;
   const assets = m.overview?.assets.length ?? 0;
-  return `Greet the user now in English, without waiting for them to speak, in one or two short sentences as Rhea${name ? ` (their name is ${name})` : ""}. Welcome them to the market globe: there are ${assets} tokenized stocks across ${countries} countries live on Solana. Invite them to ask about any country or company, for example "What's happening in China?" or "Show me Nvidia".${portfolio} Then pause and listen.`;
+  return `Say this right now, without waiting for the user: a quick, warm hello as Rhea${name ? ` (their name is ${name})` : ""} in two short sentences at most. Welcome them to the market globe${assets ? ` (${assets} tokenized stocks across ${countries} countries, live on Solana)` : ""} and say they can ask about any country or company, like "What's happening in China?" or "Show me Nvidia".${portfolio} Then stop and listen.`;
 }

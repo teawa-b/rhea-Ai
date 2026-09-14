@@ -83,7 +83,13 @@ export const useVoice = create<VoiceStore>((set, get) => {
 
     connect: async (auth, input = "mic") => {
       authRef = auth;
-      if (get().client) return;
+      const existing = get().client;
+      if (existing) {
+        /* A session that died while the headset slept is replaced, keeping the conversation. */
+        if (existing.healthy && get().state !== "error") { void existing.reviveMedia(); return; }
+        set({ client: null });
+        existing.close();
+      }
       let client: LiveClient | null = null;
       /* Ignore late events from a client that has since been replaced (e.g. switchToVoice). */
       const current = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => { if (get().client === client) fn(...a); };
@@ -160,12 +166,14 @@ export const useVoice = create<VoiceStore>((set, get) => {
       const { client, holding, state } = get();
       if (on === holding) return;
       set({ holding: on });
-      if (on && (!client || state === "error")) {
+      if (on && (!client || state === "error" || !client.healthy)) {
         const a = auth ?? authRef;
         if (a) void get().connect(a, "mic");
         return;
       }
       if (!client) return;
+      /* The mic track may have been ended by the OS since the last press. */
+      if (on) void client.reviveMedia();
       client.setMuted(!on);
       /* Duck Rhea while the user talks so she never speaks over them. */
       client.setOutputVolume(on ? 0.12 : 1);
@@ -205,4 +213,15 @@ export function wireContextUpdates() {
   wired = true;
   useWorld.subscribe((s, prev) => { if (s.contextVersion !== prev.contextVersion) useVoice.getState().pushContext(); });
   useMarket.subscribe((s, prev) => { if (s.portfolio !== prev.portfolio || s.pendingTrade !== prev.pendingTrade || s.pendingOrder !== prev.pendingOrder) useVoice.getState().pushContext(); });
+  /* Waking the headset (or returning to the tab): revive the mic, or rebuild a dropped session. */
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") recoverVoice(); });
+  window.addEventListener("pageshow", recoverVoice);
+}
+
+export function recoverVoice() {
+  const v = useVoice.getState();
+  const c = v.client;
+  if (!c) return;
+  if ((!c.healthy || v.state === "error") && authRef) { void v.connect(authRef, c.inputMode); return; }
+  void c.reviveMedia();
 }

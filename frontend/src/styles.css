@@ -157,6 +157,8 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
 .orb:hover svg { transform: scale(1.1); }
 .orb.thinking svg { animation: spin 1.1s linear infinite reverse; } /* keep the icon upright while the ring spins */
 /* Before the first tap: a soft expanding ring says "this is the button". */
+.orb svg { color: #aab4c0; }
+.orb.mic-hot svg { color: #ff3b4e; filter: drop-shadow(0 0 6px rgba(255,59,78,0.8)); }
 .orb.invite { opacity: 1; }
 .orb.invite::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 1.5px solid rgba(20,241,149,0.6); animation: invite 2.2s ease-out infinite; pointer-events: none; }
 @keyframes invite { 0% { transform: scale(0.92); opacity: 0.9; } 70%, 100% { transform: scale(1.35); opacity: 0; } }
