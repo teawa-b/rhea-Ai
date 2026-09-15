@@ -41,6 +41,9 @@ export type TokenizedAsset = {
   tokenProgram?: string;
   liquidityUsd?: number;
   holderCount?: number;
+  /** Token-2022 scaled-UI multiplier config (xStocks corporate actions). Convert
+   *  UI ↔ raw with effectiveUiMultiplier / uiToRawAmount from shared/registry. */
+  scaledUi?: { multiplier: number; newMultiplier?: number; newMultiplierEffectiveAt?: string };
 };
 
 export type PriceSnapshot = {
@@ -63,6 +66,46 @@ export type PriceSnapshot = {
     newMultiplier?: number;
     newMultiplierEffectiveAt?: string;
   };
+  /** Last US regular-session (4pm ET) close of the underlying, from Yahoo meta */
+  lastCloseUsd?: number | null;
+  /** When that close printed (ISO); null during the session when only the previous close is known */
+  lastCloseAt?: string | null;
+  /** tokenPriceUsd vs lastCloseUsd in % ("+0.74% vs 4pm close"); only set outside the regular session */
+  gapVsClosePct?: number | null;
+  /** xStocks trading.currentPeriod verbatim: "market" | "extended" | "overnight" | "closed" */
+  xstocksPeriod?: string | null;
+  /** xStocks issuer (xChange) trading available right now; Jupiter swaps on Solana don't depend on it */
+  xstocksOpenNow?: boolean | null;
+  /** Issuer halt flag for this xStock */
+  halted?: boolean | null;
+  /** Next US regular open (09:30 America/New_York), holiday-aware via the Pyth schedule (ISO) */
+  nextRegularOpenAt?: string | null;
+  sessionLabel?: SessionLabel;
+};
+
+/** Only these three strings: weeknights are "regular session closed" (xStocks trade 24/5), weekends are "closed for the weekend". */
+export type SessionLabel = "US regular session" | "regular session closed" | "US market closed for the weekend";
+
+/** GET /api/market/session — for the HUD pill */
+export type MarketSessionInfo = {
+  usRegularOpen: boolean;
+  sessionLabel: SessionLabel;
+  nextRegularOpenAt: string | null;
+  /** Jupiter swaps on Solana never close */
+  solanaOpen: true;
+  /** xStocks trading.currentPeriod for the reference symbol (NVDAx), verbatim */
+  xstocksPeriod?: string | null;
+  asOf: string;
+};
+
+/** xStocks proof of reserves: shares held at the custodian vs tokens circulating (all chains) */
+export type ProofOfReserves = {
+  symbol: string;
+  backedPct: number;         // 100.17
+  custodian: string;         // "Alpaca"
+  shares: number;
+  circulating: number;
+  asOf: string;
 };
 
 export type ChartRange = "1D" | "5D" | "1M" | "3M" | "1Y" | "5Y" | "MAX";
@@ -102,12 +145,67 @@ export type ImpactAnalysis = {
 export type CorporateAction = {
   id: string;
   companyId: string;
-  type: "dividend" | "split" | "reverse_split" | "merger" | "ticker_change" | "delisting" | "rebase";
+  type: "dividend" | "split" | "reverse_split" | "merger" | "ticker_change" | "delisting" | "rebase" | "other";
   effectiveAt: string;
   source: string;
   detail?: string;
   previousMultiplier?: number;
   newMultiplier?: number;
+  /** xStocks caType verbatim (CashDividend, ForwardSplit, …); say this, not a paraphrase */
+  caType?: string;
+  /** USD per share-equivalent; net is after withholding and is what balances reflect */
+  grossAmount?: number;
+  netAmount?: number;
+  currency?: string;
+  withholdingPct?: number;
+  /** The xStocks API only publishes effectiveTimeUtc (= effectiveAt); these stay unset unless the issuer states them */
+  exDate?: string;
+  payDate?: string;
+  /** Scheduled, not yet applied */
+  upcoming?: boolean;
+};
+
+export type BriefingHolding = {
+  companyId: string;
+  symbol: string;
+  name: string;
+  /** null for watchlist rows */
+  amountUi: number | null;
+  valueUsd: number | null;
+  tokenPriceUsd: number | null;
+  lastCloseUsd: number | null;
+  /** tokenPriceUsd vs the last 4pm ET close, % */
+  movePctSinceClose: number | null;
+  change24hPct: number | null;
+};
+
+export type BriefingDistribution = {
+  companyId: string;
+  symbol: string;
+  caType: string;
+  netAmount: number | null;
+  grossAmount: number | null;
+  currency: string;
+  /** effectiveAt (ISO) */
+  date: string | null;
+  upcoming: boolean;
+  /** Speakable; never claims this wallet received a payout */
+  heldNote: string;
+};
+
+/** GET /api/market/briefing/:wallet and /api/market/briefing?watch=… — stateless, anchored to the last close */
+export type Briefing = {
+  wallet: string | null;
+  /** "watchlist" when signed out or the wallet holds no xStocks */
+  mode: "wallet" | "watchlist";
+  asOf: string;
+  session: MarketSessionInfo;
+  totalValueUsd: number | null;
+  usdcBalance: number | null;
+  holdings: BriefingHolding[];
+  distributions: BriefingDistribution[];
+  reserves: { symbol: string; backedPct: number; custodian: string; asOf: string }[];
+  notes: string[];
 };
 
 export type TradeSide = "buy" | "sell";
@@ -120,17 +218,26 @@ export type TradeQuote = {
   outputMint: string;
   inAmount: string;          // base units
   outAmount: string;         // base units
-  inAmountUi: number;
+  inAmountUi: number;        // UI units (xStock side includes the scaled-UI multiplier)
   outAmountUi: number;
   inSymbol: string;
   outSymbol: string;
   priceImpactPct: number;
   slippageBps: number;
   route: string;             // "Jupiter" + engine label
+  /** Signature + priority fee lamports paid by the taker (0 on gasless routes) */
   feeLamports: number;
   transaction: string;       // base64 unsigned
   quotedAt: string;
   provider: "jupiter-swap-v2" | "jupiter-ultra";
+  /** Total Jupiter fee rate on this swap (order `feeBps`: platform fee plus any gasless recoup; already in outAmount) */
+  feeBps?: number;
+  /** feeBps applied to the swap's USD value */
+  platformFeeUsd?: number;
+  /** feeLamports × SOL price */
+  networkFeeUsd?: number;
+  /** One-time token-account rent the taker pays when first receiving this token */
+  rentFeeUsd?: number;
 };
 
 export type TradeIntent = {
@@ -146,6 +253,12 @@ export type TradeIntent = {
   signature?: string;
   error?: string;
   createdAt: string;
+  /** Receipt: ms from sending the signed tx to /execute until Jupiter answered Success (excludes wallet approval time) */
+  confirmMs?: number;
+  /** Receipt: ISO time the app saw Success */
+  confirmedAt?: string;
+  /** Receipt: US session at confirmation ("US regular session" | "regular session closed" | "US market closed for the weekend") */
+  sessionLabel?: string;
 };
 
 export type AgentRule = {
@@ -160,8 +273,18 @@ export type AgentRule = {
   createdAt: string;
   expiresAt?: string;
   jupiterOrderId?: string;
-  txSignature?: string;
+  txSignature?: string;      // deposit into the Jupiter order vault
   simulated?: boolean;       // true when JUPITER_API_KEY is absent
+  /** Jupiter's display state from order history: pending | open | executing | filled | pending_withdraw | cancelled | expired | failed */
+  jupiterState?: string;
+  /** Fill tx from the order's history events */
+  fillTxSignature?: string;
+  /** Withdrawal tx: the refund after a cancel/expiry, or the output payout after a fill */
+  withdrawTxSignature?: string;
+  /** Jupiter still holds this order's funds (expired, or a cancel was started but not signed); the cancel flow withdraws them */
+  needsWithdrawal?: boolean;
+  /** ISO time this rule was last read from Jupiter order history */
+  syncedAt?: string;
 };
 
 export type AssetCapability = {

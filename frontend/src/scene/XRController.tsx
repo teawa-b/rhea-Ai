@@ -10,6 +10,8 @@ import { useRef } from "react";
 import * as THREE from "three";
 import { useVoice } from "@/ai/voice";
 import { C } from "@/theme";
+import { FONT_BODY, FONT_BOLD } from "./fonts";
+import { GlassRect } from "./glass";
 
 /* A and B sit ~1.5 cm apart on a Touch controller, so the two tags are
  * stacked at different heights: the talk tag rides high, the B tag stays low
@@ -33,19 +35,14 @@ function ButtonTag({ title, sub, accent, active, faded, lift, size = 1 }: { titl
       </mesh>
       <group ref={ref} position={[0, lift, 0]}>
         <Billboard follow lockX={false} lockY={false} lockZ={false}>
-          <mesh position={[0, 0, -0.001]}>
-            <planeGeometry args={[w, h]} />
-            <meshBasicMaterial color={active ? accent : "#0b0f1c"} transparent opacity={(active ? 0.55 : 0.78) * opacity} toneMapped={false} depthWrite={false} />
-          </mesh>
-          <lineSegments position={[0, 0, -0.0005]}>
-            <edgesGeometry args={[new THREE.PlaneGeometry(w, h)]} />
-            <lineBasicMaterial color={accent} transparent opacity={opacity} toneMapped={false} />
-          </lineSegments>
-          <Text position={[0, sub ? 0.006 * size : 0, 0]} fontSize={0.0085 * size} color="#ffffff" anchorX="center" anchorY="middle" letterSpacing={0.12} fillOpacity={opacity} outlineWidth={0.0012} outlineColor="#05060d">
+          {/* Backing + border in one draw; the old edgesGeometry was rebuilt on every render. */}
+          <GlassRect position={[0, 0, -0.001]} w={w} h={h} r={h * 0.3} top={active ? accent : "#0b0f1c"} accent={accent}
+            fill={(active ? 0.55 : 0.78) * opacity} rim={opacity} stroke={0.0007} glow={0} sheen={0} bar={0} topBar={0} />
+          <Text font={FONT_BOLD} position={[0, sub ? 0.006 * size : 0, 0]} fontSize={0.0085 * size} color="#ffffff" anchorX="center" anchorY="middle" letterSpacing={0.12} fillOpacity={opacity} outlineWidth={0.0012} outlineColor="#05060d">
             {title}
           </Text>
           {sub ? (
-            <Text position={[0, -0.007 * size, 0]} fontSize={0.006 * size} color={accent} anchorX="center" anchorY="middle" letterSpacing={0.1} fillOpacity={opacity}>
+            <Text font={FONT_BODY} position={[0, -0.007 * size, 0]} fontSize={0.006 * size} color={accent} anchorX="center" anchorY="middle" letterSpacing={0.1} fillOpacity={opacity}>
               {sub}
             </Text>
           ) : null}

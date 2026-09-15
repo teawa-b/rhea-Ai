@@ -6,14 +6,14 @@
  * compact JSON the backend model can turn into a spoken sentence.
  */
 import { COMPANY_BY_ID, COUNTRIES, resolveCompany, resolveCountry } from "@shared/registry";
-import type { ChartRange, CountryCode, NewsEvent } from "@shared/types";
+import type { AgentRule, ChartRange, CountryCode, NewsEvent } from "@shared/types";
 import type { RheaAuth } from "@/auth/Auth";
 import { api } from "@/market/api";
-import { assetForCompany, useMarket } from "@/state/market";
+import { DEMO_READ_ONLY, assetForCompany, useMarket } from "@/state/market";
 import { REGIONS, REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
-import { describeRule, prepareTrade, prepareTrigger, type TriggerKind } from "@/solana/trade";
-import { fmtAge } from "@/theme";
+import { describeRule, hasTriggerToken, orderStatusLabel, prepareTrade, prepareTrigger, syncOrders, type TriggerKind } from "@/solana/trade";
+import { fmtAge, fmtEt } from "@/theme";
 
 type Args = Record<string, unknown>;
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -44,10 +44,14 @@ async function companyProfile(q: string) {
       tokenVsUnderlyingPct: divergence == null ? null : Number(divergence.toFixed(2)),
       change24hPct: p.change24hPct == null ? null : Number(p.change24hPct.toFixed(2)),
       marketSession: p.marketSession, stale: p.stale,
+      /* Session wording and the gap Rhea states before an off-hours trade (prompts.ts step 7). */
+      sessionLabel: p.sessionLabel ?? null, lastCloseUsd: p.lastCloseUsd ?? null,
+      tokenVsLast4pmClosePct: p.gapVsClosePct ?? null, halted: p.halted ?? null,
     },
     position: pos ? { tokens: pos.amountUi, valueUsd: pos.valueUsd } : null,
     activeOrders: orders.map((o) => ({ id: o.id, rule: describeRule(o), simulated: !!o.simulated })),
-    corporateActions: d.corporateActions.map((c) => ({ type: c.type, effectiveAt: c.effectiveAt, detail: c.detail })),
+    corporateActions: d.corporateActions.map((c) => ({ caType: c.caType ?? c.type, effectiveAt: c.effectiveAt, upcoming: c.upcoming ?? false, netAmount: c.netAmount ?? null, grossAmount: c.grossAmount ?? null, detail: c.detail })),
+    reserves: d.reserves ? `${d.reserves.symbol} ${d.reserves.backedPct}% backed (${d.reserves.custodian})` : null,
   };
 }
 
@@ -55,6 +59,46 @@ function regionResult(id: string) {
   const region = REGION_BY_ID[id];
   const markets = (useMarket.getState().overview?.countries ?? []).filter((c) => region.countries.includes(c.code));
   return { ok: true, region: region.name, markets: markets.map((c) => ({ country: c.name, tradableStocks: c.tradableCount, companies: c.companies.map((cid) => COMPANY_BY_ID[cid]?.name) })) };
+}
+
+/* show_holdings and get_briefing share this: fly to the holdings planet and refresh the balances its moons show. */
+function flyToHoldings() {
+  useWorld.getState().showHoldings();
+  return useMarket.getState().loadPortfolio();
+}
+
+/* Signed-out briefing: liquid names the server also defaults to (NVDAx, SPYx, TSLAx). */
+const DEFAULT_WATCH = ["nvidia", "sp500", "tesla"];
+const pct2 = (n: number) => Number(n.toFixed(2));
+
+/** Limit-order lines for the briefing, from the store's synced orders (the backend can't read them: they need the wallet's JWT). */
+async function briefingOrders(wallet: string, livePrice: Map<string, number>) {
+  /* Fresh status only when a JWT is cached (never a prompt), and never more than 4 s of the opener. */
+  const sync = hasTriggerToken(wallet) ? await Promise.race([syncOrders(null), new Promise<null>((r) => setTimeout(() => r(null), 4000))]) : null;
+  const m = useMarket.getState();
+  if (m.wallet !== wallet || !m.orders.length) return null;
+  const active = m.orders.filter((o) => o.status === "active");
+  const missing = [...new Set(active.map((o) => o.companyId))].filter((id) => !livePrice.has(id) && m.prices[id]?.tokenPriceUsd == null);
+  if (missing.length) await m.loadPrices(missing);
+  const prices = useMarket.getState().prices;
+  const weekAgo = Date.now() - 7 * 86400_000;
+  return {
+    source: sync?.ok ? "Jupiter order history (live)" : `cached on this device${m.ordersSyncedAt ? `, last synced ${fmtAge(m.ordersSyncedAt)}` : ""}`,
+    active: active.slice(0, 5).map((o) => {
+      const px = livePrice.get(o.companyId) ?? prices[o.companyId]?.tokenPriceUsd ?? null;
+      const below = o.condition.kind === "price_below";
+      /* How far the live token price must still travel to reach the trigger; <= 0 means it is already there. */
+      const away = px ? ((below ? px - o.condition.priceUsd : o.condition.priceUsd - px) / px) * 100 : null;
+      return {
+        symbol: COMPANY_BY_ID[o.companyId]?.tokenSymbol, rule: describeRule(o), status: orderStatusLabel(o), tokenPriceUsd: px == null ? null : pct2(px),
+        distance: away == null ? null : away <= 0 ? "price is at or past the trigger; Jupiter fills it when it can" : `${pct2(away)}% ${below ? "fall" : "rise"} still needed`,
+      };
+    }),
+    recentlyFilled: m.orders.filter((o) => o.status === "completed" && Date.parse(o.createdAt) >= weekAgo).slice(0, 3)
+      .map((o) => ({ symbol: COMPANY_BY_ID[o.companyId]?.tokenSymbol, rule: describeRule(o), placedAt: fmtEt(o.createdAt), fillTx: o.fillTxSignature ?? null })),
+    fundsStillInVault: m.orders.filter((o) => o.status !== "active" && o.needsWithdrawal).length || undefined,
+    note: "Orders are held by Jupiter, not Rhea, in the user's Jupiter order vault.",
+  };
 }
 
 export function createToolRunner(getAuth: () => RheaAuth) {
@@ -220,11 +264,21 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       case "get_market_overview": {
         const ov = m.overview ?? (await m.loadOverview());
         if (!ov) throw new Error("Market overview unavailable");
+        /* The store's overview is already tradable-only. Liquidity lets the model keep thin names out of
+         * trade suggestions; most-liquid first so a size-capped result still keeps the names worth naming.
+         * $25k is the voice-suggestion floor; the $100 MIN_TRADABLE_LIQUIDITY_USD only decides globe visibility.
+         * No ticker field (token is ≈ ticker + "x"): the live 67-name list stays ~10k chars, under the 12k output cap. */
+        const TRADE_SIZE_MIN_LIQUIDITY_USD = 25_000;
+        const liq = new Map(ov.assets.map((a) => [a.companyId, a.liquidityUsd ?? 0]));
+        const companies = ov.companies
+          .map((c) => ({ id: c.id, name: c.name, token: c.tokenSymbol, country: c.countryCode, sector: c.sector, liquidityUsd: Math.round((liq.get(c.id) ?? 0) / 100) * 100, tradeable_size_ok: (liq.get(c.id) ?? 0) >= TRADE_SIZE_MIN_LIQUIDITY_USD }))
+          .sort((a, b) => b.liquidityUsd - a.liquidityUsd);
         return {
           fetchedAt: ov.fetchedAt,
           source: ov.source,
-          countries: ov.countries.map((c) => ({ code: c.code, name: c.name, assets: c.assetCount, tradable: c.tradableCount })),
-          companies: ov.companies.map((c) => ({ id: c.id, name: c.name, ticker: c.ticker, token: c.tokenSymbol, country: c.countryCode, sector: c.sector, tradable: ov.assets.find((a) => a.companyId === c.id)?.tradable ?? false })),
+          note: `Only these companies are tradable now. Suggest trading only tradeable_size_ok names (>= $${TRADE_SIZE_MIN_LIQUIDITY_USD / 1000}k onchain liquidity).`,
+          countries: ov.countries.map((c) => ({ code: c.code, name: c.name, tradable: c.tradableCount })),
+          companies,
         };
       }
       case "get_company_profile":
@@ -271,8 +325,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
           m.setLoginPrompt({ reason: "Sign in to see your holdings", after: "show_holdings" });
           return { ok: false, error: "User is not signed in. A sign-in panel is now showing: ask them to sign in there; their holdings planet opens once they're in." };
         }
-        w.showHoldings();
-        const p = await m.loadPortfolio();
+        const p = await flyToHoldings();
         if (!p) throw new Error("Could not read the wallet");
         return {
           ok: true, shown: "holdings planet",
@@ -281,6 +334,37 @@ export function createToolRunner(getAuth: () => RheaAuth) {
           stocksValueUsd: Number(p.positions.reduce((s, x) => s + (x.valueUsd ?? 0), 0).toFixed(2)),
           totalValueUsd: Number(p.totalValueUsd.toFixed(2)),
           note: "totalValueUsd is USDC plus stocks; SOL is held for network fees and not priced here.",
+        };
+      }
+      case "get_briefing": {
+        /* The store's wallet covers a signed-in user and a read-only demo wallet alike. */
+        const wallet = m.wallet;
+        const [b, p] = await Promise.all([m.loadBriefing(wallet), wallet ? flyToHoldings() : Promise.resolve(null)]);
+        let shown = wallet ? "holdings planet" : null;
+        if (!wallet) {
+          /* Signed out: fly to the first watchlist name so the globe moves while Rhea talks. */
+          const first = (b?.holdings.map((h) => h.companyId) ?? DEFAULT_WATCH).find((id) => assetForCompany(id));
+          if (first && w.focusCompany(first)) { void m.loadDetail(first, true); void m.loadHistory(first, w.chartRange); shown = COMPANY_BY_ID[first].name; }
+        }
+        if (!b) {
+          if (!p) throw new Error("The briefing is unavailable right now");
+          return { ok: false, shown, error: "The briefing service didn't answer, so there are no moves vs the 4pm close. Give the wallet value only and offer to try again.", totalValueUsd: Number(p.totalValueUsd.toFixed(2)), usdcBalance: Number(p.usdcBalance.toFixed(2)) };
+        }
+        const livePrice = new Map(b.holdings.filter((h) => h.tokenPriceUsd != null).map((h) => [h.companyId, h.tokenPriceUsd!]));
+        const orders = wallet ? await briefingOrders(wallet, livePrice) : null;
+        const biggest = b.holdings.filter((h) => h.movePctSinceClose != null).sort((x, y) => Math.abs(y.movePctSinceClose!) - Math.abs(x.movePctSinceClose!))[0];
+        const s = b.session;
+        return {
+          ok: true, mode: b.mode, shown,
+          session: { label: s.sessionLabel, nextRegularOpen: s.nextRegularOpenAt ? fmtEt(s.nextRegularOpenAt) : null, solana: "open" },
+          totalValueUsd: b.totalValueUsd, usdcBalance: b.usdcBalance,
+          biggestMoveVsClose: biggest ? { symbol: biggest.symbol, name: biggest.name, movePct: biggest.movePctSinceClose, tokenPriceUsd: biggest.tokenPriceUsd == null ? null : pct2(biggest.tokenPriceUsd), lastCloseUsd: biggest.lastCloseUsd, change24hPct: biggest.change24hPct } : null,
+          holdings: b.holdings.slice(0, 8).map((h) => ({ symbol: h.symbol, valueUsd: h.valueUsd, movePctVsClose: h.movePctSinceClose, change24hPct: h.change24hPct })),
+          ...(orders ? { orders } : {}),
+          distributions: b.distributions.slice(0, 4).map((d) => ({ symbol: d.symbol, caType: d.caType, netAmount: d.netAmount, grossAmount: d.grossAmount, currency: d.currency, date: d.date?.slice(0, 10) ?? null, upcoming: d.upcoming, say: d.heldNote })),
+          reserves: b.reserves.slice(0, 4).map((r) => `${r.symbol} ${r.backedPct}% backed (${r.custodian})`),
+          notes: b.notes,
+          next: `Speak chain facts only, in at most three short sentences and in this order: ${b.mode === "wallet" ? "the wallet value, " : "that this is a default watchlist (the user isn't signed in), "}the biggest move vs the 4pm close, ${orders ? "the order status, " : ""}any distribution (use its say wording and caType; never claim this wallet was paid), then reserves. Use the session label as given. No web_search for this. Then ask whether they want the news behind ${biggest?.name ?? "the biggest mover"}.`,
         };
       }
       case "get_swap_quote": {
@@ -294,15 +378,16 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       case "get_corporate_actions": {
         const co = needCompany(str(args.company));
         const d = await m.loadDetail(co.id, true);
-        return { company: co.name, actions: d?.corporateActions ?? [], rebase: d?.price.rebase ?? null, note: "xStocks reflect dividends/splits through a balance multiplier (rebasing); treatment comes from the issuer's onchain data." };
+        return { company: co.name, actions: d?.corporateActions ?? [], rebase: d?.price.rebase ?? null, reserves: d?.reserves ?? null, note: "From the xStocks corporate actions API. Name each event by its caType exactly. Distributions are reflected in token balances through the multiplier; netAmount (after withholding) is what balances reflect. Don't claim this user was paid unless they held the token on that date." };
       }
 
-      /* ---------------- Trading (prepare only) ---------------- */
+      /* ---------------- Trading (prepare only) ----------------
+       * In ?demo=1 prepareTrade / prepareTrigger refuse with the read-only message and open the sign-in panel. */
       case "prepare_buy": {
         const r = await prepareTrade(getAuth(), str(args.company), "buy", num(args.amount_usdc));
         if (!r.ok) return { ok: false, error: r.error, reasons: r.reasons };
         const q = r.intent.quote!;
-        return { ok: true, status: "awaiting_user_confirmation", preview: { spend: `${q.inAmountUi} USDC`, receive: `≈ ${q.outAmountUi.toFixed(4)} ${q.outSymbol}`, priceImpactPct: q.priceImpactPct, route: q.route, network: "Solana" }, next: "Ask the user to press Confirm on the panel. Do not say the trade is complete." };
+        return { ok: true, status: "awaiting_user_confirmation", preview: { spend: `${q.inAmountUi} USDC`, receive: `≈ ${q.outAmountUi.toFixed(4)} ${q.outSymbol}`, priceImpactPct: q.priceImpactPct, route: q.route, network: "Solana" }, next: `Ask the user to press Confirm on the panel. Do not say the trade is complete.` };
       }
       case "prepare_sell": {
         const co = needCompany(str(args.company));
@@ -310,35 +395,79 @@ export function createToolRunner(getAuth: () => RheaAuth) {
         let amount = num(args.amount_tokens);
         if (!Number.isFinite(amount) || amount <= 0) {
           const frac = num(args.fraction);
-          if (!pos) return { ok: false, error: `No ${co.tokenSymbol} position to sell.` };
-          amount = pos.amountUi * (Number.isFinite(frac) && frac > 0 ? Math.min(1, frac) : 1);
+          /* The demo wallet's own positions may be missing: fall through so prepareTrade gives the read-only refusal. */
+          if (!pos && !m.demoMode) return { ok: false, error: `No ${co.tokenSymbol} position to sell.` };
+          amount = (pos?.amountUi ?? 1) * (Number.isFinite(frac) && frac > 0 ? Math.min(1, frac) : 1);
         }
         const r = await prepareTrade(getAuth(), co.id, "sell", amount);
         if (!r.ok) return { ok: false, error: r.error, reasons: r.reasons };
         const q = r.intent.quote!;
-        return { ok: true, status: "awaiting_user_confirmation", preview: { sell: `${q.inAmountUi} ${q.inSymbol}`, receive: `≈ ${q.outAmountUi.toFixed(2)} USDC`, priceImpactPct: q.priceImpactPct, route: q.route }, next: "Ask the user to press Confirm on the panel." };
+        return { ok: true, status: "awaiting_user_confirmation", preview: { sell: `${q.inAmountUi} ${q.inSymbol}`, receive: `≈ ${q.outAmountUi.toFixed(2)} USDC`, priceImpactPct: q.priceImpactPct, route: q.route }, next: `Ask the user to press Confirm on the panel.` };
       }
       case "create_price_trigger": {
         const kind = (str(args.kind) === "sell_above" ? "sell_above" : "buy_below") as TriggerKind;
         const r = await prepareTrigger(getAuth(), str(args.company), kind, num(args.trigger_price_usd), num(args.amount), Number.isFinite(num(args.expires_in_days)) ? num(args.expires_in_days) : 30);
         if (!r.ok) return { ok: false, error: r.error };
-        return { ok: true, status: "awaiting_user_confirmation", rule: describeRule(r.rule), simulated: r.rule.simulated ? "server has no JUPITER_API_KEY — the rule will be recorded locally, not onchain" : undefined, next: "Ask the user to confirm on the holographic order panel." };
+        return { ok: true, status: "awaiting_user_confirmation", rule: describeRule(r.rule), simulated: r.rule.simulated ? "dev build without JUPITER_API_KEY: the rule is recorded on this device only, not on Jupiter" : undefined, next: `Ask the user to confirm on the order panel.` };
       }
-      case "get_active_orders":
-        return { orders: m.orders.filter((o) => o.status === "active").map((o) => ({ id: o.id, rule: describeRule(o), createdAt: o.createdAt, simulated: !!o.simulated, jupiterOrderId: o.jupiterOrderId ?? null })) };
+      case "get_active_orders": {
+        const auth = getAuth();
+        if (!auth.authenticated || !auth.address) return { ok: false, error: "User is not signed in, so there are no orders to show. Limit orders belong to a wallet; ask them to sign in first." };
+        /* Live from Jupiter only when a JWT is cached: this tool must never spring a signature prompt. */
+        const sync = hasTriggerToken(auth.address) ? await syncOrders(auth) : null;
+        const cur = useMarket.getState();
+        const view = (o: AgentRule) => ({
+          id: o.id, jupiterOrderId: o.jupiterOrderId ?? null, rule: describeRule(o), status: orderStatusLabel(o), createdAt: o.createdAt, expiresAt: o.expiresAt ?? null,
+          ...(o.simulated ? { simulated: "dev only, not on Jupiter" } : {}),
+        });
+        /* Orders still holding funds (expired, or a cancel not yet signed) need the user's withdrawal. */
+        const withdrawable = cur.orders.filter((o) => o.status !== "active" && o.needsWithdrawal);
+        return {
+          source: sync?.ok ? "Jupiter order history (live)" : "cached on this device",
+          syncedAt: sync?.ok ? sync.syncedAt : cur.ordersSyncedAt,
+          orders: cur.orders.filter((o) => o.status === "active").map(view),
+          ...(withdrawable.length ? { fundsStillInVault: withdrawable.map(view) } : {}),
+          note: sync?.ok
+            ? "Orders are held by Jupiter, not Rhea, in the user's Jupiter order vault. To cancel one (or withdraw an expired order's funds), call cancel_price_trigger with its id."
+            : `Live status from Jupiter needs a quick wallet signature, so this is the list last cached on this device and may be out of date${sync && !sync.needsSignature ? ` (Jupiter didn't answer: ${sync.error})` : ""}. Say so plainly; it refreshes after the user's next order or cancel.`,
+        };
+      }
       case "cancel_price_trigger": {
-        const o = m.orders.find((x) => x.id === str(args.order_id) || x.jupiterOrderId === str(args.order_id));
-        if (!o) return { ok: false, error: "Order not found" };
-        m.setPendingOrder({ ...o, status: "cancelled" });
-        return { ok: true, status: "awaiting_user_confirmation", rule: describeRule(o) };
+        const auth = getAuth();
+        if (!auth.authenticated || !auth.address) return { ok: false, error: "User is not signed in. Orders can only be cancelled by the wallet that placed them; ask them to sign in first." };
+        if (hasTriggerToken(auth.address)) await syncOrders(auth); // fresh status first, never a prompt
+        const q = str(args.order_id).trim();
+        const orders = useMarket.getState().orders;
+        /* Exact id, else a unique prefix of the Jupiter id (the card shows the first 8 characters). */
+        const prefix = q.length >= 6 ? orders.filter((x) => x.jupiterOrderId?.startsWith(q)) : [];
+        const o = orders.find((x) => x.id === q || x.jupiterOrderId === q) ?? (prefix.length === 1 ? prefix[0] : undefined);
+        if (!o) return { ok: false, error: prefix.length > 1 ? "That id matches more than one order; use the full id from get_active_orders." : "Order not found. Call get_active_orders for the current ids." };
+        if (o.status === "completed") return { ok: false, error: `That order already filled (${describeRule(o)}), so there is nothing to cancel.` };
+        if (o.status === "cancelled" && !o.needsWithdrawal) return { ok: false, error: `That order is already ${orderStatusLabel(o).toLowerCase()}; nothing is left to cancel.`, refundTx: o.withdrawTxSignature ?? null };
+        /* Opens the confirmation card only: cancelling needs the user's press and a wallet signature. */
+        m.setPendingOrder(o, "cancel");
+        return {
+          ok: true, status: "awaiting_user_confirmation", rule: describeRule(o), orderStatus: orderStatusLabel(o),
+          next: o.needsWithdrawal
+            ? "Ask the user to press Withdraw funds on the card and approve the wallet signature; it returns the funds from their Jupiter order vault. Do not say it is done."
+            : "Ask the user to press Cancel order on the card. Jupiter stops the order, then they approve one wallet signature for the refund from their Jupiter order vault. Do not say it is cancelled yet.",
+        };
       }
 
-      /* ---------------- Compliance ---------------- */
+      /* ---------------- Trade checks (liquidity floor, minimums) ---------------- */
       case "check_trade_eligibility": {
         const co = needCompany(str(args.company));
         const action = (["buy", "sell", "trigger"].includes(str(args.action)) ? str(args.action) : "buy") as "buy" | "sell" | "trigger";
+        const auth = getAuth();
         const r = await api.eligibility(co.id, action);
-        return { company: co.name, allowed: r.result.allowed, reasons: r.result.reasons, disclosure: r.result.disclosure, disclosureUrl: r.result.disclosureUrl, asset: r.asset ? { symbol: r.asset.symbol, tradable: r.asset.tradable } : null, signedIn: getAuth().authenticated };
+        return {
+          company: co.name,
+          allowed: m.demoMode ? false : r.result.allowed,
+          reasons: m.demoMode ? [DEMO_READ_ONLY, ...r.result.reasons] : r.result.reasons,
+          disclosure: r.result.disclosure, disclosureUrl: r.result.disclosureUrl,
+          asset: r.asset ? { symbol: r.asset.symbol, tradable: r.asset.tradable } : null,
+          signedIn: auth.authenticated,
+        };
       }
 
       default:

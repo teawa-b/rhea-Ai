@@ -33,7 +33,7 @@ Built for the [Stocklana hackathon](https://hackathons.solana.com/hackathons/sto
 | Auth + wallet | **Privy** (Google / email / existing wallet) | embedded Solana wallet created on login; private keys never touch the app or the AI |
 | Voice + reasoning | **GPT-Live-1** (voice) delegating to **GPT-5.6 Terra** (tools + web search) | 25 function tools move the world; the model cites sources it found |
 | Portfolio | Solana RPC (`getParsedTokenAccountsByOwner`, SPL + Token-2022) | positions, USDC, SOL, country exposure |
-| Compliance | asset capability table + jurisdiction gate | illustrative, from the issuer's public terms; the AI cannot bypass it |
+| Trade checks | liquidity floor ($25k onchain) + order minimums | enforced server-side before every quote and order; the AI cannot bypass them |
 
 ## Repo layout
 
@@ -129,12 +129,11 @@ Key files: `backend/shared/tools.ts` (the AI tool system), `backend/src/prompts.
 - News shown by Rhea is always the articles the backend found with web search — each card links to its source.
 - The AI can only *prepare* trades; execution requires pressing **Confirm** and signing in your wallet.
 - Trade preview shows asset, amount, route, price impact, fee, and the quote's age; stale quotes are refreshed before signing.
-- Compliance (`checkEligibility`) runs before every quote and order; restricted jurisdictions cannot trade, research stays open.
+- Trade checks (`checkEligibility`: liquidity floor and minimums) run before every quote and order; research stays open.
 - Underlying price and executable token price are separate data with separate timestamps; divergence > 0.5% is flagged.
 - Private keys never leave Privy; the server never sees them; the AI never sees the wallet beyond a truncated address.
 
 ## Scope notes
 
-- xStocks jurisdiction restrictions in `backend/shared/registry.ts` (and its `frontend/shared/` copy) are illustrative and must be confirmed against the issuer's terms before production.
 - Without `JUPITER_API_KEY` conditional orders are recorded locally and labelled *simulated*; swaps still execute for real through Jupiter's keyless Ultra endpoint.
-- App state (orders, jurisdiction) is kept in `localStorage` for the hackathon; the spec's Postgres/Supabase layer is a straightforward swap behind `frontend/src/state/market.ts`.
+- App state (order cache) is kept in `localStorage` for the hackathon; the spec's Postgres/Supabase layer is a straightforward swap behind `frontend/src/state/market.ts`.

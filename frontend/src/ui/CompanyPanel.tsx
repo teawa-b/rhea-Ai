@@ -7,11 +7,25 @@ import { api } from "@/market/api";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { isGated, prepareTrade, prepareTrigger, describeRule } from "@/solana/trade";
-import { fmtAge, fmtPct, fmtUsd } from "@/theme";
+import { fmtAge, fmtPct, fmtUsd, sessionLabel } from "@/theme";
+import type { CorporateAction } from "@shared/types";
 import { Chart } from "./Chart";
 import { CloseIcon } from "./icons";
 import { CoLogo } from "./CoLogo";
 import { NewsCards, ImpactCard } from "./NewsCards";
+
+/* Badges keep their exact wording (caType is verbatim), so no uppercase transform. */
+const CASE = { textTransform: "none", letterSpacing: "0.04em" } as const;
+/* Corporate-action dates are the issuer's effectiveTimeUtc; shown as the UTC day so they match what Rhea says. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const caDate = (iso: string) => { const d = new Date(iso); return Number.isFinite(d.getTime()) ? `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` : "—"; };
+const caMoney = (n: number, cur = "USD") => (cur === "USD" ? `$${n < 1 ? n.toFixed(4).replace(/0{1,2}$/, "") : n.toFixed(2)}` : `${n} ${cur}`);
+/** "Net $0.175 · gross $0.25 per share-equivalent · 30% withholding"; null for events without amounts (splits etc.). */
+function caAmounts(ca: CorporateAction) {
+  if (ca.netAmount == null && ca.grossAmount == null) return null;
+  const parts = [ca.netAmount != null ? `Net ${caMoney(ca.netAmount, ca.currency)}` : null, ca.grossAmount != null ? `gross ${caMoney(ca.grossAmount, ca.currency)}` : null].filter(Boolean);
+  return `${parts.join(" · ")} per share-equivalent${ca.withholdingPct ? ` · ${ca.withholdingPct}% withholding` : ""}`;
+}
 
 export function CompanyPanel({ companyId }: { companyId: string }) {
   const co = COMPANY_BY_ID[companyId];
@@ -40,13 +54,14 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   }, [companyId, loadDetail]);
   useEffect(() => { setSvFailed(false); }, [companyId]);
 
-  /* Corporate actions from the issuer's onchain data become chart markers (spec §21). */
+  /* Corporate actions from the xStocks API become chart markers (spec §21). */
   const addChartEvent = useWorld((s) => s.addChartEvent);
   const actionsKey = detail?.corporateActions.map((c) => c.id).join(",") ?? "";
   useEffect(() => {
     for (const ca of detail?.corporateActions ?? []) {
       const ts = Date.parse(ca.effectiveAt);
-      if (Number.isFinite(ts)) addChartEvent({ companyId, timestamp: ts, title: ca.type === "rebase" ? "xStocks rebase (distribution)" : ca.type, kind: "corporate_action" });
+      /* caType verbatim from the xStocks API; the Jupiter-only multiplier row has none. */
+      if (Number.isFinite(ts)) addChartEvent({ companyId, timestamp: ts, title: ca.caType ?? (ca.type === "rebase" ? "xStocks rebase (distribution)" : ca.type), kind: "corporate_action" });
     }
   }, [actionsKey, companyId, addChartEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -58,6 +73,13 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const cls = change == null ? "" : change >= 0 ? "pos" : "neg";
   const divergence = p?.tokenPriceUsd && p?.underlyingPriceUsd ? ((p.tokenPriceUsd - p.underlyingPriceUsd) / p.underlyingPriceUsd) * 100 : null;
   const tradable = detail?.asset?.tradable ?? false;
+  /* Session wording from the server; the clock-only fallback never says "closed" on a weeknight. */
+  const session = p ? p.sessionLabel ?? sessionLabel(p.marketSession) : undefined;
+  const inSession = p?.sessionLabel ? p.sessionLabel === "US regular session" : p?.marketSession === "regular";
+  const gap = !inSession && p?.gapVsClosePct != null && Number.isFinite(p.gapVsClosePct) ? p.gapVsClosePct : null;
+  const reserves = detail?.reserves ?? null;
+  /* Upcoming first, then newest. */
+  const actions = [...(detail?.corporateActions ?? [])].sort((a, b) => Number(!!b.upcoming) - Number(!!a.upcoming) || Date.parse(b.effectiveAt) - Date.parse(a.effectiveAt));
   /* Signed-out users may still press Buy: prepareTrade opens the sign-in panel. */
   const canTrade = tradable;
   /* Company news when there is some; otherwise keep the country briefing that led here visible. */
@@ -110,9 +132,19 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           </div>
         </div>
         <div className="row" style={{ marginTop: 6 }}>
-          <span className={`tag ${p?.marketSession === "regular" ? "green" : "dim"}`}>{p ? p.marketSession.replace("_", " ") : "…"}</span>
+          <span className={`tag ${inSession ? "green" : "dim"}`}>{p ? session ?? p.marketSession.replace("_", " ") : "…"}</span>
+          {p?.halted ? <span className="tag magenta" title="The issuer has halted this xStock">issuer halt</span> : null}
           {p?.stale ? <span className="tag amber">stale data</span> : null}
-          {divergence != null && Math.abs(divergence) > 0.5 ? <span className="tag amber">token {divergence > 0 ? "+" : ""}{divergence.toFixed(2)}% vs stock</span> : null}
+          {gap != null ? (
+            <span className={`tag ${gap >= 0 ? "green" : "magenta"}`} style={CASE} title={p?.lastCloseUsd != null ? `Solana token ${fmtUsd(p.tokenPriceUsd)} vs ${fmtUsd(p.lastCloseUsd)} at the US 4pm ET close` : undefined}>
+              Token {gap >= 0 ? "+" : ""}{gap.toFixed(2)}% vs 4pm close
+            </span>
+          ) : divergence != null && Math.abs(divergence) > 0.5 ? <span className="tag amber">token {divergence > 0 ? "+" : ""}{divergence.toFixed(2)}% vs stock</span> : null}
+          {reserves ? (
+            <span className={`tag ${reserves.backedPct >= 100 ? "green" : "amber"}`} style={CASE} title={`${reserves.shares.toLocaleString(undefined, { maximumFractionDigits: 0 })} shares held at ${reserves.custodian} vs ${reserves.circulating.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${reserves.symbol} circulating (all chains) · xStocks proof of reserves · ${fmtAge(reserves.asOf)}`}>
+              Backed {reserves.backedPct.toFixed(2)}% · {reserves.custodian}
+            </span>
+          ) : null}
           <span className="hint">token {fmtAge(p?.tokenUpdatedAt)} · stock {fmtAge(p?.underlyingUpdatedAt)}</span>
         </div>
 
@@ -134,7 +166,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
             <div className="divider" />
             {active.map((o) => (
               <div key={o.id} className="impact" style={{ marginBottom: 6 }}>
-                <div className="row"><span className="tag amber">◉ agent watching</span>{o.simulated ? <span className="tag dim">simulated</span> : <span className="tag green">onchain</span>}</div>
+                <div className="row"><span className="tag amber">◉ limit order</span>{o.simulated ? <span className="tag dim">dev only</span> : <span className="tag green">held by Jupiter, not Rhea</span>}</div>
                 <div style={{ fontSize: 12.5, marginTop: 6 }}>{describeRule(o)}</div>
                 <div className="hint">created {fmtAge(o.createdAt)}{o.jupiterOrderId ? ` · Jupiter ${o.jupiterOrderId.slice(0, 8)}…` : ""}</div>
               </div>
@@ -143,17 +175,25 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         ) : null}
 
         {/* Corporate actions */}
-        {detail?.corporateActions.length ? (
+        {actions.length ? (
           <>
             <div className="divider" />
-            <div className="hint" style={{ marginBottom: 4 }}>CORPORATE ACTION</div>
-            {detail.corporateActions.map((ca) => (
-              <div key={ca.id} className="impact">
-                <div className="row"><span className="tag amber">{ca.type}</span><span className="hint">effective {new Date(ca.effectiveAt).toLocaleDateString()}</span></div>
-                <div style={{ fontSize: 12, marginTop: 6, color: "#c7d7ea" }}>{ca.detail}</div>
-                <div className="hint">source: {ca.source}</div>
-              </div>
-            ))}
+            <div className="hint" style={{ marginBottom: 4 }}>CORPORATE ACTIONS · xStocks</div>
+            {actions.map((ca) => {
+              const amounts = caAmounts(ca);
+              return (
+                <div key={ca.id} className="impact" style={{ marginBottom: 6 }}>
+                  <div className="row">
+                    <span className="tag amber" style={CASE}>{ca.caType ?? ca.type}</span>
+                    {ca.upcoming ? <span className="tag">scheduled</span> : null}
+                    <span className="hint" title={ca.effectiveAt}>effective {caDate(ca.effectiveAt)}{ca.payDate ? ` · paid ${caDate(ca.payDate)}` : ""}</span>
+                  </div>
+                  {amounts ? <div className="mono" style={{ fontSize: 12, marginTop: 6, color: "#e8f4ff" }}>{amounts}</div> : null}
+                  {ca.detail ? <div style={{ fontSize: 11.5, marginTop: 4, color: "#c7d7ea" }}>{ca.detail}</div> : null}
+                  <div className="hint">source: {ca.source}</div>
+                </div>
+              );
+            })}
           </>
         ) : null}
 

@@ -19,8 +19,14 @@ import type { Company, CountryCode } from "./types";
 import { XSTOCKS_CATALOG } from "./xstocks-catalog";
 
 /** A token is "tradable" only when Jupiter reports at least this much onchain
- *  liquidity. Below ~$100 a swap of any size slips badly or fails to route. */
+ *  liquidity. Below ~$100 a swap of any size slips badly or fails to route.
+ *  Drives globe visibility; the trade gate is MIN_TRADE_LIQUIDITY_USD. */
 export const MIN_TRADABLE_LIQUIDITY_USD = 100;
+
+/** Buys and limit orders are refused below this onchain liquidity: thin pools
+ *  quote fine but fill far from the 4pm close. Sells stay allowed so nobody is
+ *  trapped in a position. */
+export const MIN_TRADE_LIQUIDITY_USD = 25_000;
 
 export type CountryDef = { code: CountryCode; name: string; lat: number; lng: number; demonym?: string };
 
@@ -356,11 +362,39 @@ export function resolveCountry(query: string): CountryDef | undefined {
 }
 
 /* ---- Compliance capability table (spec §15). ----
- * Illustrative, sourced from the issuer's public terms; the exact rules must be
- * confirmed with the issuer (xStocks / Backed) before production use. */
+ * Restricted list per the issuer's distribution terms (Kraken/Bybit xStocks FAQs
+ * list US, UK, Canada and Australia). The check is self-declared, not KYC. */
 export const XSTOCKS_DISCLOSURE_URL = "https://xstocks.com/";
-export const XSTOCKS_RESTRICTED_JURISDICTIONS = ["US", "CA", "GB"];
+export const XSTOCKS_RESTRICTED_JURISDICTIONS = ["US", "GB", "CA", "AU"];
 export const XSTOCKS_MIN_TRADE_USD = 1;
+/** Jupiter Trigger V2 rejects deposits worth less than this (400 at deposit/craft). */
+export const TRIGGER_MIN_ORDER_USD = 10;
 
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
+
+/* ---- Token-2022 scaled-UI amounts (xStocks corporate actions) ----
+ * An xStock balance onchain is a raw integer; wallets, RPC uiAmount and Jupiter
+ * usdPrice all use UI units = raw / 10^decimals × multiplier. Jupiter swap and
+ * trigger amounts (inAmount/outAmount/amount/inputAmount) are RAW, so convert at
+ * that boundary only. The multiplier switches to newMultiplier once
+ * newMultiplierEffectiveAt passes (verified: NVDAx RPC uiAmount/amount = newMultiplier). */
+export type ScaledUiConfig = { multiplier: number; newMultiplier?: number; newMultiplierEffectiveAt?: string };
+
+export function effectiveUiMultiplier(cfg: ScaledUiConfig | null | undefined, nowMs = Date.now()): number {
+  if (!cfg || !(cfg.multiplier > 0)) return 1;
+  const at = cfg.newMultiplierEffectiveAt ? Date.parse(cfg.newMultiplierEffectiveAt) : NaN;
+  return cfg.newMultiplier && cfg.newMultiplier > 0 && Number.isFinite(at) && nowMs >= at ? cfg.newMultiplier : cfg.multiplier;
+}
+
+/** Raw base units (string or number) → UI amount. */
+export function rawToUiAmount(raw: string | number | bigint, decimals: number, multiplier = 1): number {
+  return (Number(raw) / 10 ** decimals) * multiplier;
+}
+
+/** UI amount → raw base units as a string. Floors, so selling a full displayed
+ *  balance never asks for one raw unit more than the wallet holds. */
+export function uiToRawAmount(ui: number, decimals: number, multiplier = 1): string {
+  /* The tiny relative nudge absorbs float error (19.99 × 1e6 = 19989999.999999996). */
+  return BigInt(Math.max(0, Math.floor((ui / (multiplier || 1)) * 10 ** decimals * (1 + 1e-14)))).toString();
+}

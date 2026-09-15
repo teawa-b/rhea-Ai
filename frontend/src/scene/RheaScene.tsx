@@ -4,9 +4,9 @@
  * Per Meta's WebXR MR guidance the content must be drawn on a transparent
  * background, so the renderer is created with alpha and the void backdrop,
  * fog and starfield are only mounted outside AR sessions. */
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { XR, createXRStore, useXR } from "@react-three/xr";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { C } from "@/theme";
 import { CameraRig, XrHeadAnchor } from "./CameraRig";
@@ -49,18 +49,45 @@ export async function enterImmersive(): Promise<"immersive-ar" | "immersive-vr" 
   return null;
 }
 
-/* Backdrop only outside passthrough; also bump Quest's default 72 Hz to 90. */
+type RateSession = XRSession & { updateTargetFrameRate?: (r: number) => Promise<void>; supportedFrameRates?: Float32Array; frameRate?: number };
+
+/* Backdrop only outside passthrough; also bump Quest's default 72 Hz to 90,
+ * stepping back down once if the app can't hold it (Meta's guidance: a missed
+ * frame is synthesized by the compositor and reads as judder, so a steady 72
+ * beats a stuttering 90). */
 function Environment() {
   const mode = useXR((s) => s.mode);
   const session = useXR((s) => s.session);
   const passthrough = mode === "immersive-ar";
+  const perf = useRef({ start: 0, frames: 0, slow: 0, settled: false });
   useEffect(() => {
+    perf.current = { start: 0, frames: 0, slow: 0, settled: false };
     if (!session) return;
-    const s = session as XRSession & { updateTargetFrameRate?: (r: number) => Promise<void>; supportedFrameRates?: Float32Array };
+    const s = session as RateSession;
     const rates = s.supportedFrameRates ? Array.from(s.supportedFrameRates) : [];
     const target = rates.includes(90) ? 90 : rates.length ? Math.max(...rates.filter((r) => r <= 90)) : 0;
     if (target && s.updateTargetFrameRate) s.updateTargetFrameRate(target).catch(() => undefined);
   }, [session]);
+  useFrame((state, dt) => {
+    const p = perf.current;
+    const s = session as RateSession | null;
+    if (!s?.updateTargetFrameRate || !s.supportedFrameRates || p.settled) return;
+    const rate = s.frameRate ?? 0;
+    if (rate <= 72) return;
+    const t = state.clock.elapsedTime;
+    /* Ignore session start-up (shader compiles, font parsing), then judge 4 s windows. */
+    if (!p.start) { p.start = t + 3; return; }
+    if (t < p.start) return;
+    p.frames++;
+    if (dt > 1.5 / rate) p.slow++;
+    if (t - p.start < 4) return;
+    if (p.slow / p.frames > 0.08) {
+      const lower = Array.from(s.supportedFrameRates).filter((r) => r < rate);
+      if (lower.length) s.updateTargetFrameRate(Math.max(...lower)).catch(() => undefined);
+      p.settled = true;
+    }
+    p.start = t; p.frames = 0; p.slow = 0;
+  });
   if (passthrough) return null;
   return (
     <>

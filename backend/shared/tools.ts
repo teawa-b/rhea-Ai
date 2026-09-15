@@ -192,8 +192,14 @@ export const RHEA_TOOLS: ToolDef[] = [
   /* ---------------- Market ---------------- */
   {
     type: "function",
+    name: "get_briefing",
+    description: "What changed while the US regular session was closed: the user's holdings (or a default watchlist when signed out) vs the 4pm close, distributions, proof of reserves, session status. Call first for 'what changed', 'what did I miss', 'how are my stocks'. Opens the holdings planet when signed in.",
+    parameters: obj({}),
+  },
+  {
+    type: "function",
     name: "get_market_overview",
-    description: "Live list of supported countries with tokenized-asset counts, plus every tokenized company. Use to answer 'what can I trade', 'which countries', or to resolve names.",
+    description: "Live list of supported countries with tradable counts, plus every tradable tokenized company with its onchain liquidity (liquidityUsd) and tradeable_size_ok (true at $25k or more; only suggest trading those). Use to answer 'what can I trade', 'which countries', or to resolve names.",
     parameters: obj({}),
   },
   {
@@ -230,7 +236,7 @@ export const RHEA_TOOLS: ToolDef[] = [
   {
     type: "function",
     name: "get_corporate_actions",
-    description: "Dividends / splits / rebases affecting the tokenized asset, from the issuer's onchain multiplier data.",
+    description: "Dividends, splits and other corporate actions for the tokenized asset from the xStocks issuer API (caType verbatim, gross/net USD per share-equivalent, upcoming and last 90 days), with the balance-multiplier change that reflects each one.",
     parameters: obj({ company: companyParam }, ["company"]),
   },
 
@@ -286,7 +292,7 @@ export const RHEA_TOOLS: ToolDef[] = [
   {
     type: "function",
     name: "check_trade_eligibility",
-    description: "Whether the current user may trade this asset in their jurisdiction, with the required disclosure. The app enforces this regardless; use it to explain restrictions.",
+    description: "Whether this asset can be traded right now: enough onchain liquidity (at least $25k) and the order minimums, plus the xStocks risk disclosure. The app enforces this regardless; use it to explain why a trade is refused.",
     parameters: obj({ company: companyParam, action: { type: "string", enum: ["buy", "sell", "trigger"] } }, ["company", "action"]),
   },
 ];

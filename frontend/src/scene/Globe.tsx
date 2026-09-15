@@ -1,6 +1,7 @@
 /* The planet: dot-matrix Earth, live highlight overlay, fresnel atmosphere,
  * outer halo, holographic orbit rings and drag-to-rotate input. */
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { useXR } from "@react-three/xr";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { CountryCode } from "@shared/types";
@@ -42,6 +43,9 @@ function useRimMaterial(color: string, power: number, intensity: number, inner: 
 
 /* ---------------- Globe ---------------- */
 
+/* Unlit planet tint in the headset, matched by eye to the lit desktop planet. */
+const PLANET_UNLIT = new THREE.Color("#d6dbe6");
+
 export function Globe() {
   const overview = useMarket((s) => s.overview);
   /* Asset share per country drives the purple depth (Solana branding). */
@@ -62,8 +66,11 @@ export function Globe() {
   const focused = useWorld((s) => s.focusedCountry);
   const highlighted = useWorld((s) => s.highlightedCountries);
   const heat = useWorld((s) => s.countryHeat);
-  const hlRef = useRef({ focused, highlighted, heat, lastDraw: 0, key: "" });
-  hlRef.current.focused = focused; hlRef.current.highlighted = highlighted; hlRef.current.heat = heat;
+  /* Headset budget: unlit planet, one halo fewer, no per-frame texture uploads. */
+  const inXR = useXR((s) => s.mode) != null;
+  const hlRef = useRef({ focused, highlighted, heat, lastDraw: 0, key: "", inXR });
+  hlRef.current.focused = focused; hlRef.current.highlighted = highlighted; hlRef.current.heat = heat; hlRef.current.inXR = inXR;
+  const hlMat = useRef<THREE.MeshBasicMaterial>(null);
 
   /* Atmosphere: a crisp cyan rim on the planet, then a faint purple haze that
    * falls off quickly — a hint of Solana, not a band. */
@@ -111,9 +118,15 @@ export function Globe() {
     const h = hlRef.current;
     const key = `${h.focused}|${h.highlighted.join(",")}|${Object.entries(h.heat).map(([k, v]) => `${k}:${(v ?? 0).toFixed(2)}`).join(",")}`;
     const t = state.clock.elapsedTime;
-    if (key !== h.key || (h.focused && t - h.lastDraw > 0.1)) {
+    if (h.inXR) {
+      /* Each redraw re-uploads a 1024×512 texture, so in the headset the overlay
+       * is drawn only when the set changes and the pulse is a material fade. */
+      if (key !== h.key) { h.key = key; hl.draw({ focused: h.focused, highlighted: h.highlighted, heat: h.heat, pulse: 0.25 }); }
+      if (hlMat.current) hlMat.current.opacity = h.focused ? 0.78 + 0.22 * Math.sin(t * 0.6 * Math.PI * 2) : 1;
+    } else if (key !== h.key || (h.focused && t - h.lastDraw > 0.1)) {
       h.key = key; h.lastDraw = t;
       hl.draw({ focused: h.focused, highlighted: h.highlighted, heat: h.heat, pulse: (t * 0.6) % 1 });
+      if (hlMat.current) hlMat.current.opacity = 1;
     }
     if (ringsRef.current) {
       ringsRef.current.children[0].rotation.z += dt * 0.05;
@@ -136,20 +149,25 @@ export function Globe() {
       {/* Planet */}
       <mesh onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={onUp}>
         <sphereGeometry args={[R, 96, 64]} />
-        <meshStandardMaterial
-          map={base.texture}
-          emissiveMap={base.texture}
-          emissive={new THREE.Color("#ffffff")}
-          emissiveIntensity={0.62}
-          roughness={0.85}
-          metalness={0.15}
-        />
+        {inXR ? (
+          /* The dot map is its own emissive, so lighting adds little in the headset: skip PBR and the three lights. */
+          <meshBasicMaterial map={base.texture} color={PLANET_UNLIT} />
+        ) : (
+          <meshStandardMaterial
+            map={base.texture}
+            emissiveMap={base.texture}
+            emissive={new THREE.Color("#ffffff")}
+            emissiveIntensity={0.62}
+            roughness={0.85}
+            metalness={0.15}
+          />
+        )}
       </mesh>
 
       {/* Live highlight overlay (additive) */}
       <mesh scale={1.003}>
         <sphereGeometry args={[R, 96, 64]} />
-        <meshBasicMaterial map={hl.texture} transparent blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial ref={hlMat} map={hl.texture} transparent blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
       </mesh>
 
       {tinyMarkers.map((m) => {
@@ -165,7 +183,8 @@ export function Globe() {
       {/* Atmosphere: inner rim + two back-side halos */}
       <mesh scale={1.012} material={rimInner}><sphereGeometry args={[R, 64, 48]} /></mesh>
       <mesh scale={1.07} material={halo}><sphereGeometry args={[R, 48, 32]} /></mesh>
-      <mesh scale={1.16} material={halo2}><sphereGeometry args={[R, 48, 32]} /></mesh>
+      {/* The faintest, widest halo costs the most overdraw for the least visible glow. */}
+      {inXR ? null : <mesh scale={1.16} material={halo2}><sphereGeometry args={[R, 48, 32]} /></mesh>}
 
       {/* Holographic orbit rings */}
       <group ref={ringsRef}>

@@ -54,7 +54,7 @@ export function Chart({ companyId, ticker }: { companyId: string; ticker: string
         marketOpen: detail?.price.marketSession === "regular",
         events: events.filter((e) => e.companyId === companyId),
         focusTs, width: w, height: h, dpr, ticker,
-        source: history ? (history.source === "pyth" ? "Pyth Pro" : "Yahoo Finance (fallback)") : "—",
+        source: history ? (history.source === "pyth" ? "Pyth" : "Nasdaq regular session · Yahoo") : "—",
         reveal: 1 - Math.pow(1 - t, 3),
       });
       return t;

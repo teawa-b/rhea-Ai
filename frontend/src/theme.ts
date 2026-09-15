@@ -47,3 +47,34 @@ export const fmtAge = (iso: string | null | undefined) => {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 };
+
+/** Fee-sized USD: cents above a cent, otherwise tenths of a cent ("$0.001"), "<$0.001" below that. */
+export const fmtFeeUsd = (n: number | null | undefined) =>
+  n == null || !Number.isFinite(n) ? "—" : n === 0 ? "$0" : n >= 0.01 ? `$${n.toFixed(2)}` : n >= 0.001 ? `$${n.toFixed(3)}` : "<$0.001";
+/** "1.2s" (whole seconds past 10 s). */
+export const fmtSeconds = (ms: number) => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+export const shortSig = (sig: string, n = 8) => (sig.length > n + 1 ? `${sig.slice(0, n)}…` : sig);
+export const solscanTx = (sig: string) => `https://solscan.io/tx/${sig}`;
+
+/* US Eastern wall clock (DST-aware via Intl) for receipts and session labels. */
+const ET_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+function etParts(d: Date) {
+  const p = Object.fromEntries(ET_PARTS.formatToParts(d).map((x) => [x.type, x.value]));
+  return { weekday: p.weekday ?? "", hour: Number(p.hour), minute: Number(p.minute) };
+}
+/** "Wed 22:41 ET" */
+export const fmtEt = (iso: string | number | Date) => {
+  const { weekday, hour, minute } = etParts(new Date(iso));
+  return `${weekday} ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")} ET`;
+};
+/** Session wording: weekends (ET) are "closed for the weekend"; weeknights only "regular session closed"
+ * (xStocks still trade 24/5). With no live session flag, only clock-certain cases get a label: an early
+ * close or holiday can't be told from the clock, so 9:30–16:00 on a weekday returns undefined. */
+export function sessionLabel(marketSession: string | null | undefined, at: string | number | Date = Date.now()): string | undefined {
+  const { weekday, hour, minute } = etParts(new Date(at));
+  if (weekday === "Sat" || weekday === "Sun") return "US market closed for the weekend";
+  if (marketSession === "regular") return "US regular session";
+  if (marketSession === "pre_market" || marketSession === "post_market" || marketSession === "closed") return "regular session closed";
+  const mins = hour * 60 + minute;
+  return mins < 570 || mins >= 960 ? "regular session closed" : undefined;
+}

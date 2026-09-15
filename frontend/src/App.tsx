@@ -8,7 +8,7 @@ import { RheaScene, enterImmersive, xrStore } from "@/scene/RheaScene";
 import { xrGlobe } from "@/scene/CameraRig";
 import { rig } from "@/scene/rig";
 import { describeIntent, resumeIntent } from "@/solana/trade";
-import { useMarket } from "@/state/market";
+import { demoRequested, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { Hud } from "@/ui/Hud";
@@ -17,6 +17,9 @@ function Boot() {
   const loadOverview = useMarket((s) => s.loadOverview);
   const loadStatus = useMarket((s) => s.loadStatus);
   useEffect(() => {
+    /* ?demo=1: the read-only demo wallet. PrivyBridge's wallet effect leaves it alone while signed out and
+     * ends it once a real user turns out to be signed in (either effect order works). */
+    if (demoRequested()) useMarket.getState().enterDemo();
     void loadStatus();
     void loadOverview();
     wireContextUpdates();

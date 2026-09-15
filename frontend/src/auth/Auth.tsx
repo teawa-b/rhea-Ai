@@ -56,7 +56,13 @@ function PrivyBridge({ children }: { children: ReactNode }) {
   }, [wallets, walletsReady]);
 
   const address = authenticated ? wallet?.address ?? null : null;
-  useEffect(() => { setWallet(address); }, [address, setWallet]);
+  /* A real sign-in ends the read-only ?demo=1 portfolio and takes over the store wallet. Signed out, the demo
+   * wallet (set by App's Boot) must survive: clearing to null is only for a visitor who isn't in demo mode. */
+  useEffect(() => {
+    const m = useMarket.getState();
+    if (authenticated) { m.exitDemo(); setWallet(address); }
+    else if (!m.demoMode) setWallet(null);
+  }, [authenticated, address, setWallet]);
 
   const displayName = user?.google?.name ?? user?.email?.address ?? user?.google?.email ?? (address ? `${address.slice(0, 4)}…${address.slice(-4)}` : null);
 

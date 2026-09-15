@@ -59,6 +59,45 @@ type NestedResponseEvent = {
 
 type PendingCall = { callId: string; name: string; promise: Promise<unknown> };
 
+const TOOL_OUTPUT_MAX = 12_000;
+
+/** Shrink a tool result BEFORE stringifying so the model always gets valid JSON:
+ * long arrays keep their first items plus a "…N more" marker, long strings are
+ * clipped, and both limits tighten until the text fits (slicing the JSON text
+ * afterwards cut it mid-token). */
+export function toolOutputJson(value: unknown, max = TOOL_OUTPUT_MAX): string {
+  let plain: unknown;
+  try { plain = JSON.parse(JSON.stringify(value ?? null) ?? "null"); } // drops undefined/functions, applies toJSON
+  catch { return JSON.stringify({ ok: false, error: "Tool result could not be serialised" }); }
+  const shrink = (v: unknown, items: number, chars: number): unknown => {
+    if (typeof v === "string") return v.length > chars ? `${v.slice(0, chars)}…` : v;
+    if (Array.isArray(v)) {
+      const kept = v.slice(0, items).map((x) => shrink(x, items, chars));
+      return v.length > items ? [...kept, `…${v.length - items} more`] : kept;
+    }
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shrink(x, items, chars)]));
+    return v;
+  };
+  let items = Infinity, chars = Infinity;
+  let text = JSON.stringify(plain);
+  /* Cap arrays first (big lists are the usual culprit), then strings; stop at floors. */
+  while (text.length > max) {
+    if (items > 200) items = 200;
+    else if (items > 3) items = Math.floor(items / 2);
+    else if (chars === Infinity) chars = 400;
+    else if (chars > 40) chars = Math.floor(chars / 2);
+    else if (items > 1) items = 1;
+    else break;
+    text = JSON.stringify(shrink(plain, items, chars));
+  }
+  if (text.length <= max) return text;
+  /* Pathologically wide objects (thousands of keys) can still overflow: send a valid, clipped preview. */
+  let preview = text.slice(0, max - 64);
+  let out = JSON.stringify({ truncated: true, preview });
+  while (out.length > max) { preview = preview.slice(0, preview.length - (out.length - max) - 8); out = JSON.stringify({ truncated: true, preview }); }
+  return out;
+}
+
 export class LiveClient {
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
@@ -439,7 +478,7 @@ export class LiveClient {
     const results = await Promise.all(calls.map((c) => c.promise));
     calls.forEach((c, i) => {
       const out = results[i] ?? { ok: true };
-      this.send({ type: "response.item.create", item: { type: "function_call_output", call_id: c.callId, output: JSON.stringify(out).slice(0, 12_000) } });
+      this.send({ type: "response.item.create", item: { type: "function_call_output", call_id: c.callId, output: toolOutputJson(out) } });
     });
     this.send({ type: "response.create" });
     this.continued.add(delegationId);

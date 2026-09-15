@@ -9,6 +9,16 @@ import { MicIcon, MicOffIcon } from "./icons";
 
 type MicStep = "ask" | "requesting" | "granted" | "blocked";
 
+/** Where the launcher makes sense: the Quest browser, an explicit ?xr=1, or localhost (keeps the desktop IWER
+ * emulator QA path). Android Chrome also reports immersive-ar, so feature detection alone showed it on phones. */
+export function xrLaunchAllowed(): boolean {
+  try {
+    if (navigator.userAgent.includes("OculusBrowser")) return true;
+    if (new URLSearchParams(window.location.search).get("xr") === "1") return true;
+    return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  } catch { return false; }
+}
+
 async function micPermission(): Promise<PermissionState | "unknown"> {
   try {
     const p = await navigator.permissions.query({ name: "microphone" as PermissionName });

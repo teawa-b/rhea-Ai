@@ -3,23 +3,39 @@ import type { Request, Response, Router } from "express";
 import express from "express";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  COMPANIES, COMPANY_BY_ID, COUNTRIES, MIN_TRADABLE_LIQUIDITY_USD, USDC_MINT,
+  COMPANIES, COMPANY_BY_ID, COMPANY_BY_TOKEN, COUNTRIES, MIN_TRADE_LIQUIDITY_USD, TRIGGER_MIN_ORDER_USD, USDC_MINT,
   XSTOCKS_DISCLOSURE_URL, XSTOCKS_MIN_TRADE_USD, XSTOCKS_RESTRICTED_JURISDICTIONS, resolveCompany,
 } from "../shared/registry";
 import type {
-  AssetCapability, ChartRange, CorporateAction, CountrySummary, EligibilityResult, MarketOverview, Portfolio, Position, TokenizedAsset,
+  AssetCapability, Briefing, BriefingDistribution, BriefingHolding, ChartRange, Company, CorporateAction, CountrySummary, EligibilityResult,
+  MarketOverview, Portfolio, Position, TokenizedAsset,
 } from "../shared/types";
-import { hasPythKey, history, priceSnapshot } from "./feeds";
-import { executeSwap, getPrices, getSwapQuote, hasJupiterKey, listTokenizedAssets, triggerProxy, type JupPrice } from "./jupiter";
+import { hasPythKey, history, lastCloseFor, priceSnapshot, sessionInfo } from "./feeds";
+import { JupiterError, executeSwap, getPrices, getSwapQuote, hasJupiterKey, listTokenizedAssets, triggerProxy, type JupPrice } from "./jupiter";
+import { corporateActions, proofOfReserves, type XCorporateAction } from "./xstocks";
 
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_2022_PROGRAM = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+const IS_PROD = process.env.NODE_ENV === "production";
 
 const conn = new Connection(RPC_URL, "confirmed");
 
 function bad(res: Response, status: number, message: string) {
   res.status(status).json({ error: message });
+}
+
+/* Trading routes: the client shows `error` verbatim (market/api.ts reads
+ * detail || error), so it is always one plain sentence. Raw upstream text is
+ * logged and, outside production only, echoed as `debug`. Never set `detail`. */
+function fail(res: Response, e: unknown, fallback = "Couldn't reach Jupiter right now, so please try again.") {
+  if (e instanceof JupiterError) {
+    res.status(e.httpStatus).json({ error: e.message, ...(IS_PROD ? {} : { debug: e.raw }) });
+    return;
+  }
+  const raw = (e as Error)?.message ?? String(e);
+  console.warn("[market] trade route error:", raw);
+  res.status(502).json({ error: fallback, ...(IS_PROD ? {} : { debug: raw }) });
 }
 
 async function assetFor(companyId: string): Promise<TokenizedAsset | undefined> {
@@ -54,7 +70,7 @@ export async function buildOverview(): Promise<MarketOverview> {
   };
 }
 
-/* ---------------- Compliance (spec §15) ---------------- */
+/* ---------------- Trade checks: liquidity floor + minimums ---------------- */
 
 export function capabilityFor(asset: TokenizedAsset): AssetCapability {
   return {
@@ -70,13 +86,23 @@ export function capabilityFor(asset: TokenizedAsset): AssetCapability {
   };
 }
 
+export const XSTOCKS_DISCLOSURE =
+  `xStocks are tracker certificates issued by Backed Finance that track the price of a listed share, not the share itself. ` +
+  `They carry issuer, market, liquidity and smart-contract risk, and their price can move outside regular US trading hours. ` +
+  `This is not investment advice.`;
+
 export function checkEligibility(asset: TokenizedAsset | undefined, action: "buy" | "sell" | "trigger", amountUsd?: number): EligibilityResult {
   const reasons: string[] = [];
-  const disclosure = "xStocks are tokenized tracker certificates issued by Backed Finance. They are not available to residents of restricted jurisdictions (including the United States, Canada and the United Kingdom) and carry issuer, market and smart-contract risk. This is not investment advice. Availability shown here is illustrative and must be confirmed against the issuer's terms.";
+  const disclosure = XSTOCKS_DISCLOSURE;
   if (!asset) return { allowed: false, reasons: ["This company has no tokenized asset on Solana yet."], disclosure, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
   const cap = capabilityFor(asset);
-  if (!cap.tradable && action !== "sell") reasons.push(`${asset.symbol} is listed but has too little onchain liquidity to trade (under $${MIN_TRADABLE_LIQUIDITY_USD}).`);
+  const liquidity = asset.liquidityUsd ?? 0;
+  /* Sells stay open at any liquidity so a holder is never locked in. */
+  if (action !== "sell" && (!cap.tradable || liquidity < MIN_TRADE_LIQUIDITY_USD)) {
+    reasons.push(`${asset.symbol} has only $${Math.round(liquidity).toLocaleString("en-US")} of onchain liquidity — too thin to trade safely right now.`);
+  }
   if (action === "buy" && amountUsd != null && amountUsd < cap.minimumTradeUsd) reasons.push(`Minimum trade is $${cap.minimumTradeUsd}.`);
+  if (action === "trigger" && amountUsd != null && amountUsd < TRIGGER_MIN_ORDER_USD) reasons.push(`Jupiter limit orders need at least $${TRIGGER_MIN_ORDER_USD}.`);
   return { allowed: reasons.length === 0, reasons, disclosure, disclosureUrl: cap.disclosureUrl };
 }
 
@@ -120,27 +146,230 @@ export async function readPortfolio(wallet: string): Promise<Portfolio> {
   };
 }
 
-/* ---------------- Corporate actions from xStocks rebasing ---------------- */
+/* ---------------- Corporate actions (xStocks issuer API, classified) ---------------- */
 
-function corporateActionsFrom(companyId: string, rebase: { multiplier: number; newMultiplier?: number; newMultiplierEffectiveAt?: string } | undefined): CorporateAction[] {
-  if (!rebase) return [];
-  const out: CorporateAction[] = [];
-  if (rebase.newMultiplier && rebase.newMultiplier !== rebase.multiplier && rebase.newMultiplierEffectiveAt) {
-    const up = rebase.newMultiplier > rebase.multiplier;
-    out.push({
+const CA_TYPE: Record<string, CorporateAction["type"]> = {
+  CashDividend: "dividend", StockDividend: "dividend", CashAndStockDividend: "dividend",
+  ForwardSplit: "split", UnitSplit: "split", ReverseSplit: "reverse_split",
+  CashMerger: "merger", StockMerger: "merger", StockAndCashMerger: "merger",
+  NameChange: "ticker_change", Redemption: "delisting", WorthlessRemoval: "delisting",
+};
+/* Types the issuer reflects through the Token-2022 balance multiplier. */
+const VIA_MULTIPLIER = new Set<CorporateAction["type"]>(["dividend", "split", "reverse_split"]);
+
+/* $0.175, $0.25, $2.00, $3,140.64, $0.00 */
+const usd = (n: number) => `$${n >= 1 || n === 0 ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(Number(n.toFixed(4)))}`;
+const r2 = (n: number) => Math.round(n * 100) / 100;
+/* Built by hand: ICU's en-GB short month is "Sept", and speech wants "10 Sep". */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function dayParts(iso: string, timeZone: string) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return { wd: p.weekday, date: `${p.day} ${MONTHS[+p.month - 1]}`, hm: `${p.hour}:${p.minute}` };
+}
+const utcDay = (iso: string) => dayParts(iso, "UTC").date;                                                      // "10 Sep"
+const etDay = (iso: string) => { const p = dayParts(iso, "America/New_York"); return `${p.wd} ${p.date}`; };        // "Mon 14 Sep"
+const etStamp = (iso: string) => { const p = dayParts(iso, "America/New_York"); return `${p.wd} ${p.date} ${p.hm} ET`; }; // "Tue 15 Sep 09:30 ET"
+const multChanged = (c: XCorporateAction) => c.multiplierOld != null && c.multiplierNew != null && c.multiplierOld !== c.multiplierNew;
+
+function caDetail(c: XCorporateAction, upcoming: boolean): string {
+  const parts: string[] = [];
+  const wht = c.withholdingRate ? ` after ${Math.round(c.withholdingRate * 100)}% withholding` : "";
+  if (c.grossAmount != null && c.netAmount != null && c.grossAmount !== c.netAmount) parts.push(`${c.caType}: gross ${usd(c.grossAmount)}, net ${usd(c.netAmount)} per share-equivalent${wht}.`);
+  else if ((c.netAmount ?? c.grossAmount) != null) parts.push(`${c.caType}: ${usd((c.netAmount ?? c.grossAmount)!)} per share-equivalent${wht}.`);
+  else if (c.fromUnits != null && c.toUnits != null) parts.push(`${c.caType}: ${c.fromUnits} → ${c.toUnits} units.`);
+  else parts.push(`${c.caType}.`);
+  if (multChanged(c)) parts.push(`Balance multiplier ${c.multiplierOld!.toFixed(6)} → ${c.multiplierNew!.toFixed(6)}, so token balances reflect it.`);
+  else if (upcoming && VIA_MULTIPLIER.has(CA_TYPE[c.caType] ?? "other")) parts.push("Scheduled; the issuer reflects it in token balances through the multiplier.");
+  if (c.redemptionPriceUsd != null) parts.push(`Redemption price ${usd(c.redemptionPriceUsd)}.`);
+  if (c.notes) parts.push(c.notes);
+  return parts.join(" ");
+}
+
+/** xStocks events (upcoming + last 90 days) for the company panel. Jupiter's scaled-UI config can
+ *  announce a multiplier change before the issuer API lists it, so that stays as a "rebase" row. */
+function classifyCorporateActions(
+  companyId: string,
+  xs: { history: XCorporateAction[]; upcoming: XCorporateAction[] } | null,
+  rebase: { multiplier: number; newMultiplier?: number; newMultiplierEffectiveAt?: string } | undefined,
+): CorporateAction[] {
+  const since = Date.now() - 90 * 86_400_000;
+  const rows: [XCorporateAction, boolean][] = [
+    ...(xs?.upcoming ?? []).map((c) => [c, true] as [XCorporateAction, boolean]),
+    ...(xs?.history ?? []).filter((c) => Date.parse(c.effectiveAt ?? c.createdAt) >= since).map((c) => [c, false] as [XCorporateAction, boolean]),
+  ];
+  const out: CorporateAction[] = rows.map(([c, upcoming]) => ({
+    id: `${companyId}:xstocks:${c.eventId}`,
+    companyId,
+    type: CA_TYPE[c.caType] ?? "other",
+    caType: c.caType,
+    effectiveAt: c.effectiveAt ?? c.createdAt,
+    source: "xStocks corporate actions API (Backed)",
+    detail: caDetail(c, upcoming),
+    previousMultiplier: c.multiplierOld ?? undefined,
+    newMultiplier: c.multiplierNew ?? undefined,
+    grossAmount: c.grossAmount ?? undefined,
+    netAmount: c.netAmount ?? undefined,
+    currency: c.currency,
+    withholdingPct: c.withholdingRate == null ? undefined : Math.round(c.withholdingRate * 100),
+    payDate: c.payDate ?? undefined,
+    upcoming,
+  }));
+  const known = (m: number) => [...(xs?.history ?? []), ...(xs?.upcoming ?? [])].some((c) => c.multiplierNew != null && Math.abs(c.multiplierNew - m) < 1e-9);
+  if (rebase?.newMultiplier && rebase.newMultiplierEffectiveAt && rebase.newMultiplier !== rebase.multiplier && !known(rebase.newMultiplier)) {
+    out.unshift({
       id: `${companyId}:rebase:${rebase.newMultiplierEffectiveAt}`,
       companyId,
       type: "rebase",
       effectiveAt: rebase.newMultiplierEffectiveAt,
       source: "xStocks scaled-UI multiplier (onchain)",
-      detail: up
-        ? `Balance multiplier rises from ${rebase.multiplier.toFixed(6)} to ${rebase.newMultiplier.toFixed(6)} — the issuer reflects a distribution (e.g. dividend) by increasing displayed token balances.`
-        : `Balance multiplier changes from ${rebase.multiplier.toFixed(6)} to ${rebase.newMultiplier.toFixed(6)}.`,
+      detail: `Balance multiplier changes from ${rebase.multiplier.toFixed(6)} to ${rebase.newMultiplier.toFixed(6)}; the issuer reflects corporate actions by changing displayed token balances.`,
       previousMultiplier: rebase.multiplier,
       newMultiplier: rebase.newMultiplier,
+      upcoming: Date.parse(rebase.newMultiplierEffectiveAt) > Date.now(),
     });
   }
   return out;
+}
+
+/* ---------------- Briefing (stateless, anchored to the last 4pm close) ---------------- */
+
+const DEFAULT_WATCH = ["NVDAX", "SPYX", "TSLAX"].map((t) => COMPANY_BY_TOKEN[t]?.id).filter(Boolean) as string[];
+const SESSION_REF = COMPANY_BY_TOKEN.NVDAX ?? COMPANY_BY_ID.nvidia;
+const BRIEF_ROWS = 20;
+/* Distributions + reserves cost 3 xStocks calls per symbol: only for the largest rows. */
+const BRIEF_DETAIL = 8;
+const MONTH_MS = 30 * 86_400_000;
+
+function heldNote(sym: string, c: XCorporateAction, upcoming: boolean): string {
+  const when = c.effectiveAt ? utcDay(c.effectiveAt) : "a date the issuer hasn't set";
+  const cash = c.netAmount != null ? `a net ${usd(c.netAmount)}` : c.grossAmount != null ? `a gross ${usd(c.grossAmount)}` : null;
+  const viaMult = VIA_MULTIPLIER.has(CA_TYPE[c.caType] ?? "other");
+  if (upcoming) {
+    return `${sym} has a ${c.caType} scheduled for ${when}${cash ? `: ${cash} per share-equivalent` : ""}${viaMult ? ", to be reflected in balances via the multiplier" : ""}`;
+  }
+  const reflected = multChanged(c) ? ", reflected in balances via the multiplier" : "";
+  return cash
+    ? `${sym} holders received ${cash} per share-equivalent on ${when}${reflected}`
+    : `${sym} ${c.caType} took effect on ${when}${reflected}`;
+}
+
+export async function buildBriefing(wallet: string | null, watchIds: string[]): Promise<Briefing> {
+  let walletNote: string | null = null;
+  const [session, assets, portfolio] = await Promise.all([
+    sessionInfo(SESSION_REF),
+    listTokenizedAssets(),
+    wallet
+      ? readPortfolio(wallet).catch((e) => {
+        console.warn("[market] briefing portfolio read failed:", (e as Error).message);
+        walletNote = "Couldn't read this wallet from Solana right now, so this covers the default watchlist.";
+        return null;
+      })
+      : Promise.resolve(null),
+  ]);
+
+  type Row = { co: Company; mint: string; symbol: string; amountUi: number | null; valueUsd: number | null };
+  const positions = (portfolio?.positions ?? []).filter((p) => COMPANY_BY_ID[p.companyId]);
+  const mode: Briefing["mode"] = positions.length ? "wallet" : "watchlist";
+  if (portfolio && !positions.length) walletNote = "This wallet holds no xStocks yet, so this covers the default watchlist.";
+  const rows: Row[] = (mode === "wallet"
+    ? positions.map((p) => ({ co: COMPANY_BY_ID[p.companyId], mint: p.mint, symbol: p.symbol, amountUi: p.amountUi, valueUsd: p.valueUsd }))
+    : watchIds.flatMap((id) => {
+      const a = assets.find((x) => x.companyId === id);
+      return a && COMPANY_BY_ID[id] ? [{ co: COMPANY_BY_ID[id], mint: a.mint, symbol: a.symbol, amountUi: null, valueUsd: null }] : [];
+    })).slice(0, BRIEF_ROWS);
+  const detail = rows.slice(0, BRIEF_DETAIL);
+
+  const [prices, closes, cas, pors] = await Promise.all([
+    rows.length ? getPrices(rows.map((r) => r.mint)).catch(() => ({}) as Record<string, JupPrice>) : Promise.resolve({} as Record<string, JupPrice>),
+    Promise.all(rows.map((r) => lastCloseFor(r.co))),
+    Promise.all(detail.map((r) => corporateActions(r.co.tokenSymbol))),
+    Promise.all(detail.map((r) => proofOfReserves(r.co.tokenSymbol))),
+  ]);
+
+  const holdings: BriefingHolding[] = rows.map((r, i) => {
+    const p = prices[r.mint];
+    const tp = p?.usdPrice ?? null;
+    const close = closes[i]?.lastCloseUsd ?? null;
+    return {
+      companyId: r.co.id, symbol: r.symbol, name: r.co.name,
+      amountUi: r.amountUi, valueUsd: r.valueUsd == null ? null : r2(r.valueUsd),
+      tokenPriceUsd: tp, lastCloseUsd: close,
+      movePctSinceClose: tp && close ? r2((tp / close - 1) * 100) : null,
+      change24hPct: p?.priceChange24h == null ? null : r2(p.priceChange24h),
+    };
+  });
+
+  const now = Date.now();
+  const distributions: BriefingDistribution[] = [];
+  detail.forEach((r, i) => {
+    const x = cas[i];
+    if (!x) return;
+    const sym = r.co.tokenSymbol;
+    const recent = x.history.filter((c) => c.effectiveAt && Date.parse(c.effectiveAt) <= now && now - Date.parse(c.effectiveAt) <= MONTH_MS);
+    const soon = x.upcoming.filter((c) => c.effectiveAt && Date.parse(c.effectiveAt) - now <= MONTH_MS);
+    for (const [c, upcoming] of [...recent.map((c) => [c, false] as const), ...soon.map((c) => [c, true] as const)]) {
+      distributions.push({
+        companyId: r.co.id, symbol: sym, caType: c.caType, netAmount: c.netAmount, grossAmount: c.grossAmount, currency: c.currency,
+        date: c.effectiveAt, upcoming, heldNote: heldNote(sym, c, upcoming),
+      });
+    }
+  });
+
+  const reserves = pors.flatMap((p) => (p ? [{ symbol: p.symbol, backedPct: p.backedPct, custodian: p.custodian, asOf: p.asOf }] : []));
+
+  /* Speakable facts, chain facts first: session, value, biggest move vs close, distributions, reserves. */
+  const notes: string[] = [];
+  if (walletNote) notes.push(walletNote);
+  const openAt = session.nextRegularOpenAt ? etStamp(session.nextRegularOpenAt) : null;
+  notes.push(session.usRegularOpen
+    ? "US regular session is open, so moves are vs the previous 4pm close."
+    : `${session.sessionLabel[0].toUpperCase()}${session.sessionLabel.slice(1)}${openAt ? `; next US regular open ${openAt}` : ""}. Jupiter swaps on Solana stay open${session.xstocksPeriod ? ` (xStocks period: ${session.xstocksPeriod})` : ""}.`);
+  const closeAt = closes.find((c) => c?.lastCloseAt)?.lastCloseAt;
+  if (!session.usRegularOpen && closeAt) notes.push(`Moves compare the live Solana token price with the underlying's 4pm ET close on ${etDay(closeAt)}.`);
+  if (portfolio && mode === "wallet") notes.push(`Wallet value ${usd(portfolio.totalValueUsd)} (xStocks plus ${usd(portfolio.usdcBalance)} USDC).`);
+  const mover = holdings.filter((h) => h.movePctSinceClose != null).sort((a, b) => Math.abs(b.movePctSinceClose!) - Math.abs(a.movePctSinceClose!))[0];
+  if (mover) {
+    const m = mover.movePctSinceClose!;
+    notes.push(`${mover.symbol} is ${m >= 0 ? "up" : "down"} ${Math.abs(m).toFixed(2)}% vs 4pm close (${usd(mover.tokenPriceUsd!)} vs ${usd(mover.lastCloseUsd!)}).`);
+  }
+  if (distributions.length) notes.push(...distributions.slice(0, 3).map((d) => `${d.heldNote}.`));
+  else if (detail.length) notes.push("No distributions in the last 30 days and none scheduled in the next 30 days for these xStocks.");
+  if (reserves.length) notes.push(`Proof of reserves: ${reserves.map((p) => `${p.symbol} ${p.backedPct.toFixed(2)}% backed (${p.custodian})`).join(", ")}.`);
+  notes.push("xStocks are tracker certificates that follow the share price; they are not the shares themselves.");
+  if (mode === "wallet") notes.push("Limit orders aren't in this briefing: they are held by Jupiter, not Rhea, in your Jupiter order vault, and the signed-in app reads them.");
+
+  return {
+    wallet,
+    mode,
+    asOf: new Date().toISOString(),
+    session,
+    totalValueUsd: portfolio ? r2(portfolio.totalValueUsd) : null,
+    usdcBalance: portfolio ? r2(portfolio.usdcBalance) : null,
+    holdings,
+    distributions,
+    reserves,
+    notes,
+  };
+}
+
+/* 60 s per wallet + watchlist; the promise is cached so concurrent calls share one build. */
+const briefCache = new Map<string, { at: number; data: Promise<Briefing> }>();
+function briefingCached(wallet: string | null, watch: string[]): Promise<Briefing> {
+  const key = `${wallet ?? "-"}|${watch.join(",")}`;
+  const hit = briefCache.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return hit.data;
+  for (const [k, v] of briefCache) if (Date.now() - v.at >= 60_000) briefCache.delete(k);
+  const data = buildBriefing(wallet, watch);
+  briefCache.set(key, { at: Date.now(), data });
+  data.catch(() => briefCache.delete(key));
+  return data;
+}
+
+/* ?watch=nvidia,sp500,tesla (names, tickers or token symbols) → company ids, max 6. */
+function watchFrom(q: unknown): string[] {
+  const ids = String(q ?? "").split(",").map((s) => resolveCompany(s)?.id).filter((x): x is string => Boolean(x));
+  return ids.length ? [...new Set(ids)].slice(0, 6) : DEFAULT_WATCH;
 }
 
 /* ---------------- Router ---------------- */
@@ -171,9 +400,37 @@ export function marketRouter(): Router {
     if (!co) return bad(res, 404, "Unknown company");
     try {
       const asset = await assetFor(co.id);
-      const price = await priceSnapshot(co, asset);
-      res.json({ company: co, asset: asset ?? null, price, corporateActions: corporateActionsFrom(co.id, price.rebase), capability: asset ? capabilityFor(asset) : null });
+      /* xStocks calls resolve to null on failure, so they never fail the panel. */
+      const [price, xca, reserves] = await Promise.all([priceSnapshot(co, asset), corporateActions(co.tokenSymbol), proofOfReserves(co.tokenSymbol)]);
+      res.json({
+        company: co, asset: asset ?? null, price,
+        corporateActions: classifyCorporateActions(co.id, xca, price.rebase),
+        reserves,
+        capability: asset ? capabilityFor(asset) : null,
+      });
     } catch (e) { bad(res, 502, (e as Error).message); }
+  });
+
+  /* GET /session → MarketSessionInfo { usRegularOpen, sessionLabel, nextRegularOpenAt, solanaOpen: true, xstocksPeriod, asOf }.
+   * Reference symbol NVDA: every US xStock shares the NYSE/Nasdaq calendar. */
+  r.get("/session", async (_req, res) => {
+    try { res.json(await sessionInfo(SESSION_REF)); }
+    catch (e) { bad(res, 502, (e as Error).message); }
+  });
+
+  /* GET /briefing?watch=nvidia,sp500,tesla → Briefing (mode "watchlist"; default NVDAx, SPYx, TSLAx)
+   * GET /briefing/:wallet[?watch=…]      → Briefing (mode "wallet", or "watchlist" when it holds no xStocks)
+   * Stateless: anchored to the last 4pm close, no orders (those need the wallet's Jupiter JWT), cached 60 s. */
+  r.get("/briefing", async (req, res) => {
+    try { res.json(await briefingCached(null, watchFrom(req.query.watch))); }
+    catch (e) { bad(res, 502, (e as Error).message); }
+  });
+
+  r.get("/briefing/:wallet", async (req, res) => {
+    const wallet = String(req.params.wallet);
+    try { new PublicKey(wallet); } catch { return bad(res, 400, "That doesn't look like a Solana wallet address."); }
+    try { res.json(await briefingCached(wallet, watchFrom(req.query.watch))); }
+    catch (e) { bad(res, 502, (e as Error).message); }
   });
 
   r.get("/prices", async (req, res) => {
@@ -207,57 +464,140 @@ export function marketRouter(): Router {
     catch (e) { bad(res, 400, (e as Error).message); }
   });
 
+  /* POST /eligibility { company, action?: "buy"|"sell"|"trigger", amountUsd? }
+   *   → { company, asset|null, result: EligibilityResult } */
   r.post("/eligibility", async (req, res) => {
     const { company, action, amountUsd } = req.body ?? {};
     const co = resolveCompany(String(company ?? ""));
     if (!co) return bad(res, 404, "Unknown company");
+    const act = action === "sell" || action === "trigger" ? action : "buy";
+    const usd = amountUsd == null || amountUsd === "" ? undefined : Number(amountUsd);
     const asset = await assetFor(co.id);
-    res.json({ company: co, asset: asset ?? null, result: checkEligibility(asset, action ?? "buy", amountUsd) });
+    res.json({ company: co, asset: asset ?? null, result: checkEligibility(asset, act, Number.isFinite(usd) ? usd : undefined) });
   });
 
+  /* POST /quote { company, side: "buy"|"sell", amount (USDC for buys, UI tokens for sells), taker }
+   *   → 200 { quote: TradeQuote, eligibility, asset } | 403 { error: reasons, eligibility } | 4xx/502 { error: one sentence } */
   r.post("/quote", async (req, res) => {
     const { company, side, amount, taker } = req.body ?? {};
     const co = resolveCompany(String(company ?? ""));
     if (!co) return bad(res, 404, "Unknown company");
-    if (!taker) return bad(res, 400, "Wallet (taker) required");
+    if (!taker) return bad(res, 400, "Sign in first so Rhea knows which wallet is trading.");
     const amt = Number(amount);
-    if (!Number.isFinite(amt) || amt <= 0) return bad(res, 400, "Amount must be positive");
+    if (!Number.isFinite(amt) || amt <= 0) return bad(res, 400, "Amount must be positive.");
+    const s = side === "sell" ? "sell" : "buy";
     try {
       const asset = await assetFor(co.id);
-      const elig = checkEligibility(asset, side === "sell" ? "sell" : "buy", side === "buy" ? amt : undefined);
-      if (!asset || !elig.allowed) return res.status(403).json({ error: "Not eligible", eligibility: elig });
-      const quote = await getSwapQuote({ side: side === "sell" ? "sell" : "buy", companyId: co.id, asset, amountUi: amt, taker });
+      const elig = checkEligibility(asset, s, s === "buy" ? amt : undefined);
+      if (!asset || !elig.allowed) return res.status(403).json({ error: elig.reasons.join(" ") || "Not eligible", eligibility: elig });
+      const quote = await getSwapQuote({ side: s, companyId: co.id, asset, amountUi: amt, taker: String(taker) });
       res.json({ quote, eligibility: elig, asset });
-    } catch (e) { bad(res, 502, (e as Error).message); }
+    } catch (e) { fail(res, e); }
   });
 
+  /* POST /execute { signedTransaction, requestId } → Jupiter's result; on status "Failed", `error` is one sentence. */
   r.post("/execute", async (req, res) => {
     const { signedTransaction, requestId } = req.body ?? {};
-    if (!signedTransaction || !requestId) return bad(res, 400, "signedTransaction and requestId required");
-    try { res.json(await executeSwap(String(signedTransaction), String(requestId))); }
-    catch (e) { bad(res, 502, (e as Error).message); }
+    if (!signedTransaction || !requestId) return bad(res, 400, "The signed transaction is missing, so get a fresh quote and try again.");
+    try {
+      const { raw, ...out } = await executeSwap(String(signedTransaction), String(requestId));
+      res.json(IS_PROD || !raw ? out : { ...out, debug: raw });
+    } catch (e) { fail(res, e); }
   });
 
-  /* Trigger V2 proxy — the browser never sees the Jupiter key. */
+  /* ---------------- Trigger V2 proxy (limit orders) ----------------
+   * The browser never sees the Jupiter key. Every call is POST /api/market/trigger/:step
+   * with a JSON body; steps after verify send the 24 h JWT as header `x-trigger-jwt`.
+   * Orders are held by Jupiter, not Rhea: deposits sit in the user's Jupiter order
+   * vault (Privy-managed, one per wallet). Shapes per developers.jup.ag/docs/trigger/*.
+   * Amounts are RAW base units (xStocks: uiToRawAmount(ui, decimals, effectiveUiMultiplier(asset.scaledUi))).
+   *
+   *  challenge       body { walletPubkey, type: "message" | "transaction" }
+   *                  → { type: "message", challenge } | { type: "transaction", transaction }   (expires in 5 min)
+   *  verify          body { type: "message", walletPubkey, signature: bs58(signMessage(challenge)) }
+   *                     | { type: "transaction", walletPubkey, signedTransaction: base64 }
+   *                  → { token }   (JWT, 24 h, no refresh: cache it per wallet in memory)
+   *  vault           body {} → { userPubkey, vaultPubkey, privyVaultId }   (GET /vault, registers on 404)
+   *  deposit         body { inputMint, outputMint, userAddress, amount: raw string, orderType: "price", orderSubType: "single" }
+   *                  → { transaction: base64 unsigned, requestId, receiverAddress, mint, amount, tokenDecimals, inputTokenAccount }
+   *                  Worth >= $10 or Jupiter answers 400. Transfer-hook input mints are rejected unless
+   *                  Jupiter whitelists them (NVDAx has a hook, so sell-side deposits may fail).
+   *                  Rhea also runs checkEligibility("trigger") here (liquidity floor).
+   *  order           body { orderType: "single", depositRequestId, depositSignedTx: base64, userPubkey, inputMint, outputMint,
+   *                         inputAmount: raw string, triggerMint, triggerCondition: "above" | "below", triggerPriceUsd: number,
+   *                         slippageBps?: number, expiresAt: ms epoch (required, future) }
+   *                  → { id, txSignature (deposit), depositConfirmed }
+   *  cancel          body { orderId } → POST /orders/price/cancel/{orderId}
+   *                  → { id, transaction: base64 unsigned withdrawal, requestId }   (order stops filling immediately)
+   *  confirm-cancel  body { orderId, signedTransaction: base64 signed withdrawal, cancelRequestId: cancel's requestId }
+   *                  → { id, txSignature }   (retry with the same cancelRequestId if it doesn't land;
+   *                  the same two steps withdraw an expired order's funds)
+   *  history         body { state?: "active" | "past", mint?, limit?: 1-100 (20), offset? (0), sort?: "updated_at" | "created_at" | "expires_at", dir?: "asc" | "desc" }
+   *                  → { orders: [{ id, orderType, orderState, rawState, userPubkey, privyWalletPubkey, inputMint, initialInputAmount,
+   *                      remainingInputAmount, outputMint, triggerMint, triggerCondition, triggerPriceUsd, slippageBps, expiresAt,
+   *                      createdAt, updatedAt, events: [{ type, timestamp, state, txSignature?, mint?, amount? }],
+   *                      triggeredAt?, outputAmount?, inputUsed?, fillPercent? }], pagination: { total, limit, offset } }
+   *                  orderState: pending | open | executing | filled | pending_withdraw | cancelled | expired | failed
+   *
+   * Errors: { error: one sentence } with Jupiter's status for 400/401/403/404/409/429 (401 = JWT expired, re-run challenge),
+   * 502 otherwise, 501 { error, simulated: true } without JUPITER_API_KEY. */
+  const ORDER_ID = /^[A-Za-z0-9_-]{1,128}$/;
+  const HISTORY_PARAMS: Record<string, RegExp> = {
+    state: /^(active|past)$/, mint: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, limit: /^\d{1,3}$/, offset: /^\d{1,7}$/,
+    sort: /^(updated_at|created_at|expires_at)$/, dir: /^(asc|desc)$/,
+  };
+
   r.post("/trigger/:step", async (req, res) => {
     const step = String(req.params.step);
     const jwt = typeof req.headers["x-trigger-jwt"] === "string" ? req.headers["x-trigger-jwt"] : undefined;
-    if (!hasJupiterKey()) return res.status(501).json({ error: "JUPITER_API_KEY not configured", simulated: true });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!hasJupiterKey()) return res.status(501).json({ error: "Limit orders aren't switched on for this server yet.", simulated: true });
+    if (!["challenge", "verify"].includes(step) && !jwt) return bad(res, 401, "Sign the Jupiter message first so your limit orders can be managed.");
+    const orderId = String(body.orderId ?? "");
     try {
       switch (step) {
-        case "challenge": return res.json(await triggerProxy("/auth/challenge", { body: req.body }));
-        case "verify": return res.json(await triggerProxy("/auth/verify", { body: req.body }));
+        case "challenge": return res.json(await triggerProxy("/auth/challenge", { body: { walletPubkey: body.walletPubkey, type: body.type ?? "message" } }));
+        case "verify": return res.json(await triggerProxy("/auth/verify", { body }));
         case "vault": {
+          /* Register only when Jupiter says there is no vault (404); a 401 must surface as re-auth. */
           try { return res.json(await triggerProxy("/vault", { jwt })); }
-          catch { return res.json(await triggerProxy("/vault/register", { jwt })); }
+          catch (e) {
+            if (!(e instanceof JupiterError) || e.status !== 404) throw e;
+            return res.json(await triggerProxy("/vault/register", { jwt }));
+          }
         }
-        case "deposit": return res.json(await triggerProxy("/deposit/craft", { body: req.body, jwt }));
-        case "order": return res.json(await triggerProxy("/orders/price", { body: req.body, jwt }));
-        case "cancel": return res.json(await triggerProxy(`/orders/${encodeURIComponent(String(req.body?.orderId ?? ""))}/cancel`, { method: "POST", body: {}, jwt }));
-        case "history": return res.json(await triggerProxy(`/orders?userPubkey=${encodeURIComponent(String(req.body?.userPubkey ?? ""))}`, { jwt }));
+        case "deposit": {
+          const craft = body;
+          const mint = [craft.inputMint, craft.outputMint].find((m) => typeof m === "string" && m !== USDC_MINT);
+          const asset = (await listTokenizedAssets()).find((a) => a.mint === mint);
+          if (asset) {
+            const elig = checkEligibility(asset, "trigger");
+            if (!elig.allowed) return res.status(403).json({ error: elig.reasons.join(" "), eligibility: elig });
+          }
+          return res.json(await triggerProxy("/deposit/craft", { body: craft, jwt }));
+        }
+        case "order": return res.json(await triggerProxy("/orders/price", { body, jwt }));
+        case "cancel":
+          if (!ORDER_ID.test(orderId)) return bad(res, 400, "That order id doesn't look right.");
+          return res.json(await triggerProxy(`/orders/price/cancel/${orderId}`, { method: "POST", jwt }));
+        case "confirm-cancel":
+          if (!ORDER_ID.test(orderId)) return bad(res, 400, "That order id doesn't look right.");
+          if (!body.signedTransaction || !body.cancelRequestId) return bad(res, 400, "Sign the withdrawal transaction first, then confirm the cancel.");
+          return res.json(await triggerProxy(`/orders/price/confirm-cancel/${orderId}`, {
+            body: { signedTransaction: body.signedTransaction, cancelRequestId: body.cancelRequestId }, jwt,
+          }));
+        case "history": {
+          const qs = new URLSearchParams();
+          for (const [k, re] of Object.entries(HISTORY_PARAMS)) {
+            const v = body[k];
+            if (v != null && re.test(String(v))) qs.set(k, String(v));
+          }
+          const q = qs.toString();
+          return res.json(await triggerProxy(`/orders/history${q ? `?${q}` : ""}`, { jwt }));
+        }
         default: return bad(res, 404, "Unknown trigger step");
       }
-    } catch (e) { bad(res, 502, (e as Error).message); }
+    } catch (e) { fail(res, e); }
   });
 
   /* Street View Static (spec §4). Key stays server-side; the image is proxied. */

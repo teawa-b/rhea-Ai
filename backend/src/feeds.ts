@@ -4,13 +4,16 @@
  *   token price      : Jupiter Price v3
  *   OHLC history     : Pyth Pro History API → Yahoo Finance chart API (labelled)
  *   market session   : Pyth symbol schedule (keyless) → Yahoo meta
+ *   last close / gap : Yahoo range=1d meta (xStocks has no last-close field) vs Jupiter token price
+ *   trading period   : xStocks public API (xstocks.ts), verbatim
  *
  * Every snapshot carries its source and timestamps so the UI can show data
  * age and flag staleness (trust principles §26.7–9).
  */
 import { COMPANY_BY_ID } from "../shared/registry";
-import type { Candle, ChartHistory, ChartRange, Company, PriceSnapshot, TokenizedAsset } from "../shared/types";
+import type { Candle, ChartHistory, ChartRange, Company, MarketSessionInfo, PriceSnapshot, SessionLabel, TokenizedAsset } from "../shared/types";
 import { getPrices } from "./jupiter";
+import { xstocksAsset } from "./xstocks";
 
 const PYTH_KEY = process.env.PYTH_PRO_API_KEY || "";
 const PYTH = "https://pyth.dourolabs.app/v1";
@@ -30,14 +33,16 @@ export async function pythSymbolFor(company: Company): Promise<PythSymbol | null
   const key = company.pythSymbol ?? company.ticker;
   if (pythSymbolCache.has(key)) return pythSymbolCache.get(key) ?? null;
   try {
-    const list = (await (await fetch(`${PYTH}/symbols?query=${encodeURIComponent(company.ticker)}&asset_type=equity`)).json()) as PythSymbol[];
+    const r = await fetch(`${PYTH}/symbols?query=${encodeURIComponent(company.ticker)}&asset_type=equity`, { signal: AbortSignal.timeout(5_000) });
+    if (!r.ok) return null;
+    const list = (await r.json()) as PythSymbol[];
     const hit = list.find((s) => s.symbol === company.pythSymbol) ??
       list.find((s) => s.symbol.toUpperCase().endsWith(`.${company.ticker.toUpperCase()}/USD`)) ??
       list.find((s) => s.name.toUpperCase() === company.ticker.toUpperCase()) ?? null;
     pythSymbolCache.set(key, hit);
     return hit;
   } catch {
-    pythSymbolCache.set(key, null);
+    /* Not cached: a network blip must not disable session math until restart. */
     return null;
   }
 }
@@ -74,6 +79,77 @@ export async function marketSession(company: Company): Promise<PriceSnapshot["ma
   return "closed";
 }
 
+/* ---------------- Session label + next regular open ---------------- */
+
+/* Used when Pyth's symbol list is unreachable: NYSE/Nasdaq hours without holidays. */
+const DEFAULT_REGULAR = "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;";
+
+/* Wall-clock parts of instant `t` in `tz` (h23, so midnight is 00 not 24). */
+function zonedParts(tz: string, t: number) {
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", weekday: "short", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+  return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour % 24, mi: +p.minute, s: +p.second, weekday: p.weekday };
+}
+
+/* Local wall time in `tz` → UTC ms. Two passes settle DST-transition days. */
+function zonedToUtc(tz: string, y: number, mo: number, d: number, h: number, mi: number): number {
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  const offsetAt = (t: number) => { const p = zonedParts(tz, t); return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) - Math.floor(t / 1000) * 1000; };
+  const off = offsetAt(guess);
+  const t = guess - off;
+  const off2 = offsetAt(t);
+  return off2 === off ? t : guess - off2;
+}
+
+/** Next start of a regular window strictly after `now`, honouring the schedule's holiday overrides (MMDD/C or MMDD/0930-1300). */
+export function nextRegularOpen(schedule: string | undefined, now = Date.now()): string | null {
+  const [tz, days, holidays] = (schedule || DEFAULT_REGULAR).split(";");
+  const today = zonedParts(tz, now);
+  for (let i = 0; i < 15; i++) {
+    const civil = new Date(Date.UTC(today.y, today.mo - 1, today.d + i));
+    const y = civil.getUTCFullYear(), mo = civil.getUTCMonth() + 1, d = civil.getUTCDate();
+    const dow = (civil.getUTCDay() + 6) % 7; // Mon=0 like the schedule
+    const mmdd = `${String(mo).padStart(2, "0")}${String(d).padStart(2, "0")}`;
+    let windows = (days ?? "").split(",")[dow] ?? "C";
+    for (const hol of (holidays ?? "").split(",")) {
+      const [hd, w] = hol.split("/");
+      if (hd === mmdd && w) windows = w;
+    }
+    if (!windows || windows === "C") continue;
+    for (const w of windows.split("&")) {
+      const a = w.split("-")[0];
+      if (!/^\d{4}$/.test(a)) continue;
+      const at = zonedToUtc(tz, y, mo, d, +a.slice(0, 2), +a.slice(2));
+      if (at > now) return new Date(at).toISOString();
+    }
+  }
+  return null;
+}
+
+/* Weekend = Saturday, Sunday, or Friday after extended hours end (20:00 ET) — the
+ * only time "closed for the weekend" is true. Weeknights xStocks trade overnight. */
+function sessionLabelFor(regularOpen: boolean, now = Date.now()): SessionLabel {
+  if (regularOpen) return "US regular session";
+  const p = zonedParts("America/New_York", now);
+  const weekend = p.weekday === "Sat" || p.weekday === "Sun" || (p.weekday === "Fri" && p.h >= 20);
+  return weekend ? "US market closed for the weekend" : "regular session closed";
+}
+
+/** Session facts for one company's exchange (US names share the NYSE/Nasdaq calendar). */
+export async function sessionInfo(company: Company): Promise<MarketSessionInfo> {
+  const [sym, xs] = await Promise.all([pythSymbolFor(company), xstocksAsset(company.tokenSymbol)]);
+  const regular = sym?.market_session_schedule?.regular || DEFAULT_REGULAR;
+  const usRegularOpen = sessionOpen(regular);
+  return {
+    usRegularOpen,
+    sessionLabel: sessionLabelFor(usRegularOpen),
+    nextRegularOpenAt: nextRegularOpen(regular),
+    solanaOpen: true,
+    xstocksPeriod: xs?.currentPeriod ?? null,
+    asOf: new Date().toISOString(),
+  };
+}
+
 /* ---------------- Pyth Pro latest price ---------------- */
 
 async function pythLatest(company: Company): Promise<{ price: number; at: string } | null> {
@@ -102,7 +178,10 @@ async function pythLatest(company: Company): Promise<{ price: number; at: string
 
 type YahooQuote = { open: (number | null)[]; high: (number | null)[]; low: (number | null)[]; close: (number | null)[]; volume: (number | null)[] };
 type YahooResult = {
-  meta: { regularMarketPrice?: number; regularMarketTime?: number };
+  meta: {
+    regularMarketPrice?: number; regularMarketTime?: number; chartPreviousClose?: number; previousClose?: number;
+    currentTradingPeriod?: { regular?: { start: number; end: number } };
+  };
   timestamp?: number[];
   indicators: { quote: YahooQuote[] };
 };
@@ -110,20 +189,51 @@ type YahooChart = { chart: { result?: YahooResult[]; error?: unknown } };
 
 async function yahooChart(symbol: string, range: string, interval: string): Promise<YahooResult | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`;
-  const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Rhea market interface)" } });
+  const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Rhea market interface)" }, signal: AbortSignal.timeout(8_000) });
   if (!r.ok) throw new Error(`Yahoo ${r.status}`);
   const j = (await r.json()) as YahooChart;
   return j.chart.result?.[0] ?? null;
+}
+
+/* range=1d meta, shared by the underlying fallback and the last close. 60 s; failures 30 s. */
+const metaCache = new Map<string, { at: number; ttl: number; data: Promise<YahooResult["meta"] | null> }>();
+function yahooMeta(symbol: string): Promise<YahooResult["meta"] | null> {
+  const hit = metaCache.get(symbol);
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.data;
+  const slot = { at: Date.now(), ttl: 60_000, data: Promise.resolve<YahooResult["meta"] | null>(null) };
+  slot.data = yahooChart(symbol, "1d", "1d").then((y) => y?.meta ?? null).catch(() => { slot.ttl = 30_000; return null; });
+  metaCache.set(symbol, slot);
+  return slot.data;
+}
+
+/** Last US regular-session close. Outside the session Yahoo's regularMarketPrice IS that
+ *  close (regularMarketTime = 16:00 ET); inside it that field is live, so use the previous close. */
+export async function lastCloseFor(company: Company): Promise<{ lastCloseUsd: number; lastCloseAt: string | null } | null> {
+  const m = await yahooMeta(company.yahooSymbol ?? company.ticker);
+  if (!m) return null;
+  const now = Date.now() / 1000;
+  const reg = m.currentTradingPeriod?.regular;
+  const inSession = Boolean(reg && now >= reg.start && now < reg.end);
+  if (inSession) {
+    const prev = m.chartPreviousClose ?? m.previousClose;
+    return prev ? { lastCloseUsd: prev, lastCloseAt: null } : null;
+  }
+  return m.regularMarketPrice
+    ? { lastCloseUsd: m.regularMarketPrice, lastCloseAt: m.regularMarketTime ? new Date(m.regularMarketTime * 1000).toISOString() : null }
+    : null;
 }
 
 /* ---------------- Snapshot ---------------- */
 
 export async function priceSnapshot(company: Company, asset: TokenizedAsset | undefined): Promise<PriceSnapshot> {
   const mint = asset?.mint ?? "";
-  const [jup, pyth, session] = await Promise.all([
+  const [jup, pyth, session, info, close, xs] = await Promise.all([
     mint ? getPrices([mint]).then((m) => m[mint]).catch(() => undefined) : Promise.resolve(undefined),
     pythLatest(company),
     marketSession(company),
+    sessionInfo(company),
+    lastCloseFor(company),
+    xstocksAsset(company.tokenSymbol),
   ]);
 
   let underlying: number | null = null;
@@ -132,14 +242,17 @@ export async function priceSnapshot(company: Company, asset: TokenizedAsset | un
   if (pyth) { underlying = pyth.price; underlyingSource = "pyth"; underlyingAt = pyth.at; }
   else if (jup?.stockData?.price) { underlying = jup.stockData.price; underlyingSource = "jupiter-stockdata"; underlyingAt = jup.stockData.updatedAt; }
   else {
-    try {
-      const y = await yahooChart(company.yahooSymbol ?? company.ticker, "1d", "1d");
-      if (y?.meta.regularMarketPrice) {
-        underlying = y.meta.regularMarketPrice; underlyingSource = "yahoo";
-        underlyingAt = y.meta.regularMarketTime ? new Date(y.meta.regularMarketTime * 1000).toISOString() : null;
-      }
-    } catch { /* leave null */ }
+    const m = await yahooMeta(company.yahooSymbol ?? company.ticker);
+    if (m?.regularMarketPrice) {
+      underlying = m.regularMarketPrice; underlyingSource = "yahoo";
+      underlyingAt = m.regularMarketTime ? new Date(m.regularMarketTime * 1000).toISOString() : null;
+    }
   }
+
+  /* Jupiter usdPrice is already per UI token (multiplier included), so compare it to the close directly. */
+  const tokenPrice = jup?.usdPrice ?? null;
+  const gap = session !== "regular" && !info.usRegularOpen && tokenPrice && close
+    ? Math.round((tokenPrice / close.lastCloseUsd - 1) * 10_000) / 100 : null;
 
   const tokenAt = jup ? new Date().toISOString() : null;
   const newest = [underlyingAt, tokenAt].filter(Boolean).map((s) => Date.parse(s as string));
@@ -148,7 +261,7 @@ export async function priceSnapshot(company: Company, asset: TokenizedAsset | un
   return {
     companyId: company.id,
     mint,
-    tokenPriceUsd: jup?.usdPrice ?? null,
+    tokenPriceUsd: tokenPrice,
     underlyingPriceUsd: underlying,
     underlyingSource,
     change24hPct: jup?.priceChange24h ?? null,
@@ -161,6 +274,14 @@ export async function priceSnapshot(company: Company, asset: TokenizedAsset | un
       newMultiplier: jup.scaledUiConfig.newMultiplier,
       newMultiplierEffectiveAt: jup.scaledUiConfig.newMultiplierEffectiveAt,
     } : undefined,
+    lastCloseUsd: close?.lastCloseUsd ?? null,
+    lastCloseAt: close?.lastCloseAt ?? null,
+    gapVsClosePct: gap,
+    xstocksPeriod: xs?.currentPeriod ?? null,
+    xstocksOpenNow: xs?.openNow ?? null,
+    halted: xs ? xs.isTradingHalted : null,
+    nextRegularOpenAt: info.nextRegularOpenAt,
+    sessionLabel: info.sessionLabel,
   };
 }
 

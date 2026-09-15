@@ -1,6 +1,6 @@
 /* Client-side fetchers for the Rhea API. */
 import type {
-  ChartHistory, ChartRange, Company, CorporateAction, EligibilityResult, MarketOverview, Portfolio, PriceSnapshot, TokenizedAsset, TradeQuote, AssetCapability,
+  Briefing, ChartHistory, ChartRange, Company, CorporateAction, EligibilityResult, MarketOverview, MarketSessionInfo, Portfolio, PriceSnapshot, ProofOfReserves, TokenizedAsset, TradeQuote, AssetCapability,
 } from "@shared/types";
 
 /* Where the API lives. Empty in local dev (Vite proxies /api → the backend);
@@ -29,8 +29,21 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type ServerStatus = { openai: boolean; jupiterKey: boolean; pythKey: boolean; streetView: boolean; rpc: string; liveModel: string; backendModel: string };
-export type CompanyDetail = { company: Company; asset: TokenizedAsset | null; price: PriceSnapshot; corporateActions: CorporateAction[]; capability: AssetCapability | null };
+/* reserves: xStocks proof of reserves; null (or absent on an older backend) when the issuer API didn't answer. */
+export type CompanyDetail = { company: Company; asset: TokenizedAsset | null; price: PriceSnapshot; corporateActions: CorporateAction[]; capability: AssetCapability | null; reserves?: ProofOfReserves | null };
 export type PriceLite = { tokenPriceUsd: number | null; underlyingPriceUsd: number | null; change24hPct: number | null; updatedAt: string };
+
+export type TriggerStep = "challenge" | "verify" | "vault" | "deposit" | "order" | "cancel" | "confirm-cancel" | "history";
+/** One order from Trigger V2 order history (developers.jup.ag/docs/trigger/order-history). Every field is
+ * optional here on purpose: trade.ts parses it defensively and skips orders it can't map. */
+export type JupiterOrderEvent = { type?: string; timestamp?: number | string; state?: string; txSignature?: string; mint?: string; amount?: string };
+export type JupiterOrder = {
+  id?: string; orderType?: string; orderState?: string; rawState?: string; userPubkey?: string;
+  inputMint?: string; outputMint?: string; initialInputAmount?: string; remainingInputAmount?: string;
+  triggerMint?: string; triggerCondition?: string; triggerPriceUsd?: number | string; slippageBps?: number;
+  expiresAt?: number | string; createdAt?: number | string; updatedAt?: number | string;
+  events?: JupiterOrderEvent[]; triggeredAt?: number | string; outputAmount?: string; fillPercent?: number;
+};
 
 export const api = {
   status: () => j<ServerStatus>("/api/market/status"),
@@ -39,13 +52,19 @@ export const api = {
   prices: (ids?: string[]) => j<Record<string, PriceLite>>(`/api/market/prices${ids?.length ? `?ids=${ids.join(",")}` : ""}`),
   history: (id: string, range: ChartRange) => j<ChartHistory>(`/api/market/history/${encodeURIComponent(id)}?range=${range}`),
   portfolio: (wallet: string) => j<Portfolio>(`/api/market/portfolio/${wallet}`),
+  session: () => j<MarketSessionInfo>("/api/market/session"),
+  /* A wallet's briefing, or (no wallet) one on company ids / tickers; the server falls back to NVDAx, SPYx, TSLAx. */
+  briefing: (wallet: string | null, watch?: string[]) =>
+    j<Briefing>(wallet ? `/api/market/briefing/${encodeURIComponent(wallet)}` : `/api/market/briefing${watch?.length ? `?watch=${watch.map(encodeURIComponent).join(",")}` : ""}`),
   eligibility: (company: string, action: "buy" | "sell" | "trigger", amountUsd?: number) =>
     j<{ company: Company; asset: TokenizedAsset | null; result: EligibilityResult }>("/api/market/eligibility", { method: "POST", body: JSON.stringify({ company, action, amountUsd }) }),
   quote: (company: string, side: "buy" | "sell", amount: number, taker: string) =>
     j<{ quote: TradeQuote; eligibility: EligibilityResult; asset: TokenizedAsset }>("/api/market/quote", { method: "POST", body: JSON.stringify({ company, side, amount, taker }) }),
   execute: (signedTransaction: string, requestId: string) =>
     j<{ status: string; signature?: string; error?: string; code?: number }>("/api/market/execute", { method: "POST", body: JSON.stringify({ signedTransaction, requestId }) }),
-  trigger: (step: "challenge" | "verify" | "vault" | "deposit" | "order" | "cancel" | "history", body: unknown, jwt?: string) =>
+  /* Trigger V2 proxy; request/response shapes are in the block comment above the router in backend/src/market.ts.
+   * A thrown error carries .status (401 = JWT expired or invalid: trade.ts drops its cached token). */
+  trigger: (step: TriggerStep, body: unknown, jwt?: string) =>
     j<Record<string, unknown>>(`/api/market/trigger/${step}`, { method: "POST", body: JSON.stringify(body ?? {}), headers: jwt ? { "x-trigger-jwt": jwt } : {} }),
   streetViewUrl: (id: string) => apiUrl(`/api/market/streetview/${encodeURIComponent(id)}`),
 };

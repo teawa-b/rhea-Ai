@@ -5,7 +5,10 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { C } from "@/theme";
+import { FONT_BODY, FONT_BOLD } from "./fonts";
+import { GlassRect } from "./glass";
 import { DIST, rig } from "./rig";
+import { feel } from "./xrFeedback";
 
 type Props = {
   position: THREE.Vector3 | [number, number, number];
@@ -38,14 +41,27 @@ function useLogo(url?: string) {
   return tex;
 }
 
-const CHAR_W = 0.058; // approx glyph advance at fontSize 0.1
+const CHAR_W = 0.074; // approx bold uppercase advance at fontSize 0.1, until troika reports the real width
+
+/** Laid-out width of a troika text block, once it has synced. */
+function useTextWidth() {
+  const [width, setWidth] = useState<number | null>(null);
+  const onSync = (mesh: { textRenderInfo?: { blockBounds: number[] } }) => {
+    const b = mesh.textRenderInfo?.blockBounds;
+    if (b) setWidth(b[2] - b[0]);
+  };
+  return [width, onSync] as const;
+}
 
 export function HoloLabel({ position, title, subtitle, accent = C.cyan, scale = 1, dim = false, onClick, opacity = 1, icon }: Props) {
   const logo = useLogo(icon);
   const h = subtitle ? 0.26 : 0.17;
   /* Room for the logo tile on the left when one is loaded. */
   const iconW = logo ? h - 0.04 + 0.03 : 0;
-  const w = useMemo(() => Math.max(title.length * CHAR_W, (subtitle?.length ?? 0) * CHAR_W * 0.7) + 0.16, [title, subtitle]) + iconW;
+  const [titleW, onTitleSync] = useTextWidth();
+  const [subW, onSubSync] = useTextWidth();
+  const estimate = useMemo(() => Math.max(title.length * CHAR_W, (subtitle?.length ?? 0) * CHAR_W * 0.62), [title, subtitle]);
+  const w = Math.max(titleW ?? estimate, subtitle ? subW ?? 0 : 0) + 0.16 + iconW;
   const tx = 0.01 + iconW / 2;
   const bgOpacity = (dim ? 0.55 : 0.82) * opacity;
   const inner = useRef<THREE.Group>(null);
@@ -55,22 +71,10 @@ export function HoloLabel({ position, title, subtitle, accent = C.cyan, scale = 
   });
   return (
     <Billboard position={position} follow lockX={false} lockY={false} lockZ={false}>
-      <group ref={inner} scale={scale} onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}>
-        {/* Backing */}
-        <mesh position={[0, 0, -0.002]}>
-          <planeGeometry args={[w, h]} />
-          <meshBasicMaterial color={C.panel} transparent opacity={bgOpacity} depthWrite={false} toneMapped={false} />
-        </mesh>
-        {/* Border */}
-        <lineSegments position={[0, 0, -0.001]}>
-          <edgesGeometry args={[new THREE.PlaneGeometry(w, h)]} />
-          <lineBasicMaterial color={accent} transparent opacity={(dim ? 0.35 : 0.9) * opacity} toneMapped={false} />
-        </lineSegments>
-        {/* Accent bar */}
-        <mesh position={[-w / 2 + 0.012, 0, 0]}>
-          <planeGeometry args={[0.012, h - 0.03]} />
-          <meshBasicMaterial color={accent} transparent opacity={(dim ? 0.4 : 1) * opacity} toneMapped={false} />
-        </mesh>
+      <group ref={inner} scale={scale} onClick={onClick ? (e) => { e.stopPropagation(); feel.press(e); onClick(); } : undefined} onPointerOver={onClick ? (e) => feel.hover(e) : undefined}>
+        {/* Backing, border and accent bar in one draw (was a plane, 1px line segments and a bar). */}
+        <GlassRect position={[0, 0, -0.002]} w={w} h={h} r={0.022} top={C.panel} accent={accent} interactive
+          fill={bgOpacity} rim={(dim ? 0.35 : 0.9) * opacity} stroke={0.006} bar={(dim ? 0.4 : 1) * opacity} barGeo={[0.018, 0.006, (h - 0.03) / 2]} glow={0} sheen={0} topBar={0} />
         {logo ? (
           <group position={[-w / 2 + 0.03 + (h - 0.04) / 2, 0, 0.0005]}>
             <mesh position={[0, 0, -0.0003]}>
@@ -84,6 +88,7 @@ export function HoloLabel({ position, title, subtitle, accent = C.cyan, scale = 
           </group>
         ) : null}
         <Text
+          font={FONT_BOLD}
           position={[tx, subtitle ? 0.045 : 0, 0.001]}
           fontSize={0.1}
           color={dim ? "#9fb3c8" : C.white}
@@ -94,11 +99,12 @@ export function HoloLabel({ position, title, subtitle, accent = C.cyan, scale = 
           outlineWidth={0.004}
           outlineColor={accent}
           outlineOpacity={0.35 * opacity}
+          onSync={onTitleSync}
         >
           {title.toUpperCase()}
         </Text>
         {subtitle ? (
-          <Text position={[tx, -0.07, 0.001]} fontSize={0.068} color={accent} anchorX="center" anchorY="middle" letterSpacing={0.08} fillOpacity={opacity}>
+          <Text font={FONT_BODY} position={[tx, -0.07, 0.001]} fontSize={0.068} color={accent} anchorX="center" anchorY="middle" letterSpacing={0.08} fillOpacity={opacity} onSync={onSubSync}>
             {subtitle}
           </Text>
         ) : null}

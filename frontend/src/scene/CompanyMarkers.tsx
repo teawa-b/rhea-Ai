@@ -1,7 +1,7 @@
 /* Holographic company towers at headquarters. Shown for the focused country
  * (all its companies with a live asset) and for any highlighted/compared
  * companies anywhere on the globe. Live price chips come from the market
- * store. Active conditional orders render an "AGENT WATCHING" beacon. */
+ * store. Active limit orders (held by Jupiter) render a "LIMIT ORDER · JUPITER" beacon. */
 import { useFrame } from "@react-three/fiber";
 import { useXR } from "@react-three/xr";
 import { useEffect, useMemo, useRef } from "react";
@@ -68,6 +68,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
   const towerRef = useRef<THREE.Mesh>(null);
   const haloRef = useRef<THREE.Mesh>(null);
   const beaconRef = useRef<THREE.Group>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
   const rootRef = useRef<THREE.Group>(null);
 
   useFrame((s) => {
@@ -84,6 +85,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
       beaconRef.current.rotation.y = t * 1.5;
       beaconRef.current.position.y = height + 0.09 + Math.sin(t * 2) * 0.01;
     }
+    if (glowRef.current) (glowRef.current.material as THREE.MeshBasicMaterial).opacity = 0.16 + Math.sin(t * 3) * 0.08;
   });
 
   const labelScale = mode === "hero" ? 0.34 : 0.26;
@@ -119,7 +121,9 @@ function Tower({ co, mode, lat, lng }: Placed) {
         <ringGeometry args={[0.04, 0.046, 4, 1, 0, Math.PI * 0.5]} />
         <meshBasicMaterial color={accent} transparent opacity={0.7} side={THREE.DoubleSide} depthWrite={false} toneMapped={false} />
       </mesh>
-      {/* AGENT WATCHING beacon */}
+      {/* Limit-order beacon. The glow is an additive unlit sphere, not a
+        * pointLight: mounting a light changes the scene's light count, which
+        * recompiles every lit material and stutters the frame. */}
       {activeOrders.length ? (
         <group ref={beaconRef} position={[0, height + 0.09, 0]}>
           <mesh>
@@ -130,7 +134,10 @@ function Tower({ co, mode, lat, lng }: Placed) {
             <torusGeometry args={[0.03, 0.003, 8, 24]} />
             <meshBasicMaterial color={C.gold} transparent opacity={0.7} toneMapped={false} />
           </mesh>
-          <pointLight color={C.amber} intensity={0.4} distance={0.4} />
+          <mesh ref={glowRef}>
+            <sphereGeometry args={[0.05, 12, 8]} />
+            <meshBasicMaterial color={C.amber} transparent opacity={0.22} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+          </mesh>
         </group>
       ) : null}
       {/* hit target */}
@@ -143,7 +150,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
           position={[0, height + (activeOrders.length ? 0.2 : 0.12), 0]}
           title={shortName}
           icon={logoUrl(co.id)}
-          subtitle={activeOrders.length ? `◉ AGENT WATCHING · ${sub}` : sub}
+          subtitle={activeOrders.length ? `LIMIT ORDER · JUPITER · ${sub}` : sub}
           accent={activeOrders.length ? C.amber : accent}
           scale={labelScale}
           onClick={() => focusCompany(co.id)}

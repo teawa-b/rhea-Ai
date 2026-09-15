@@ -1,12 +1,13 @@
 /* Desktop / mobile HUD over the globe. In immersive XR the DOM is hidden and
  * XRPanels renders the equivalent in-world. */
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
-import { useMarket } from "@/state/market";
+import { VERIFIED_ON_MAINNET } from "@/demo/verified";
+import { DEMO_WALLET, sessionPill, startSessionPolling, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
-import { fmtPct, fmtUsd } from "@/theme";
+import { fmtEt, fmtPct, fmtUsd, solscanTx } from "@/theme";
 import { CompanyPanel } from "./CompanyPanel";
 import { CoLogo } from "./CoLogo";
 import { CountryPanel } from "./CountryPanel";
@@ -15,7 +16,7 @@ import { NewsCards, ImpactCard } from "./NewsCards";
 import { RegionPanel } from "./RegionPanel";
 import { REGION_BY_ID } from "@/state/regions";
 import { DepositPanel, LoginPanel, OrderPanel, TradePanel } from "./TradePanel";
-import { XrLaunch } from "./XrLaunch";
+import { XrLaunch, xrLaunchAllowed } from "./XrLaunch";
 
 function SolanaMark() {
   /* Solana's three-bar mark, gradient purple → green. */
@@ -38,6 +39,59 @@ function Logo() {
   );
 }
 
+/* "Regular session closed · opens in 11h 20m · Solana: open". Ticks every 30 s so the countdown stays honest
+ * between the store's 60 s polls; hidden until the first answer rather than guessing from the local clock. */
+function SessionPill() {
+  const session = useMarket((s) => s.session);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { startSessionPolling(); const h = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(h); }, []);
+  if (!session) return null;
+  const pill = sessionPill(session, now);
+  return (
+    <span className="chip" role="status" title="xStocks trade 24/5 on Solana through Jupiter; the US regular session is 09:30–16:00 ET" style={{ alignSelf: "flex-start", maxWidth: "100%", padding: "5px 11px", borderRadius: 999, fontSize: 11, gap: 7, borderColor: pill.open ? "rgba(20,241,149,0.4)" : "rgba(255,178,32,0.4)" }}>
+      <i className={`dot ${pill.open ? "on" : "warn"}`} style={{ width: 7, height: 7 }} />
+      <span className="long">{pill.long}</span>
+      <span className="short">{pill.short}</span>
+    </span>
+  );
+}
+
+/* "Verified on mainnet (N) ↗": the committed snapshot of real transactions (demo/verified.ts), readable with no
+ * login. Renders nothing while the list is empty. */
+function VerifiedOnMainnet() {
+  const [open, setOpen] = useState(false);
+  if (!VERIFIED_ON_MAINNET.length) return null;
+  return (
+    <div className="clickable" style={{ alignSelf: "flex-start", maxWidth: "100%" }}>
+      <button type="button" className="chip" aria-expanded={open} onClick={() => setOpen(!open)} style={{ cursor: "pointer", padding: "5px 11px", borderRadius: 999, fontSize: 11, gap: 7, borderColor: "rgba(20,241,149,0.4)" }}>
+        <i className="dot on" style={{ width: 7, height: 7 }} />Verified on mainnet ({VERIFIED_ON_MAINNET.length}) ↗
+      </button>
+      {open ? (
+        <div className="panel" style={{ marginTop: 6, padding: "8px 12px", width: "min(380px, calc(100vw - 24px))" }}>
+          <div className="hint">Snapshot of real Rhea transactions on Solana mainnet</div>
+          {VERIFIED_ON_MAINNET.map((t) => (
+            <div key={t.signature} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "6px 0", borderTop: "1px solid rgba(63,224,255,0.12)", fontSize: 12 }}>
+              <div style={{ minWidth: 0 }}><div>{t.label}</div><div className="hint">{fmtEt(t.at)} · {t.session}</div></div>
+              <a href={solscanTx(t.signature)} target="_blank" rel="noreferrer" title={t.signature} style={{ whiteSpace: "nowrap" }}>Solscan ↗</a>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* Matches the phone breakpoint in styles.css (max-width: 600px). */
+function useNarrow() {
+  const q = "(max-width: 600px)";
+  const [narrow, setNarrow] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => { const mq = window.matchMedia(q); const on = () => setNarrow(mq.matches); mq.addEventListener("change", on); return () => mq.removeEventListener("change", on); }, []);
+  return narrow;
+}
+
+/* Tap-to-ask starters; the first is the evening habit Rhea is built around. */
+const SUGGESTIONS = ["What changed while the market was closed?", "Why is Nvidia moving?"];
+
 const STATE_LABEL: Record<string, string> = { off: "Tap to talk to Rhea", connecting: "Connecting…", idle: "Listening", listening: "Hearing you…", thinking: "Researching…", speaking: "Speaking", error: "Voice error" };
 
 export function Hud() {
@@ -52,6 +106,7 @@ export function Hud() {
   const loginPrompt = useMarket((s) => s.loginPrompt);
   const depositPrompt = useMarket((s) => s.depositPrompt);
   const prices = useMarket((s) => s.prices);
+  const demoMode = useMarket((s) => s.demoMode);
 
   const view = useWorld((s) => s.view);
   const focusedRegion = useWorld((s) => s.focusedRegion);
@@ -85,13 +140,15 @@ export function Hud() {
   const textMode = live && inputMode === "text";
 
   const [text, setText] = useState("");
+  const narrow = useNarrow();
+  const showCrumbs = view !== "world" || Boolean(comparison) || showPortfolio;
   const [xrMode, setXrMode] = useState<"immersive-ar" | "immersive-vr" | null>(null);
   const capRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    /* Feature-detect passthrough first (Meta: immersive-ar), then plain VR. */
+    /* Feature-detect passthrough first (Meta: immersive-ar), then plain VR; only where the launcher makes sense. */
     const xr = navigator.xr;
-    if (!xr) return;
+    if (!xr || !xrLaunchAllowed()) return;
     void xr.isSessionSupported("immersive-ar").then((ar) => {
       if (ar) { setXrMode("immersive-ar"); return; }
       return xr.isSessionSupported("immersive-vr").then((vr) => setXrMode(vr ? "immersive-vr" : null));
@@ -109,6 +166,15 @@ export function Hud() {
     return () => clearTimeout(h);
   }, [voiceNotice]);
 
+  /* Signed-out visitors: switch to ?demo=1 in place (no reload, so the tap still counts as the gesture that starts
+   * audio, and a tab that was already greeted still hears it) and ask the briefing question; get_briefing reads the store wallet. */
+  const showDemoChip = Boolean(DEMO_WALLET) && auth.ready && !auth.authenticated && !demoMode;
+  const hearDemo = () => {
+    try { const u = new URL(window.location.href); u.searchParams.set("demo", "1"); window.history.replaceState(window.history.state, "", u); } catch { /* ignore */ }
+    /* Worded as the demo so Rhea never presents a public wallet as the visitor's own. */
+    if (useMarket.getState().enterDemo()) sendText("What changed in the demo portfolio while the market was closed?", auth);
+  };
+
   const onOrb = () => {
     if (!live) void connect(auth);
     else if (textMode) { if (voiceState !== "connecting") void switchToVoice(auth); }
@@ -116,7 +182,7 @@ export function Hud() {
   };
   const orbTitle = !live ? "Start voice" : textMode ? "Use the microphone" : muted ? "Unmute" : "Mute";
   const voiceTitle = voiceState === "off" ? "Rhea" : muted && !textMode ? "Muted" : textMode && voiceState === "idle" ? "Ready" : STATE_LABEL[voiceState];
-  const voiceSub = voiceState === "off" ? STATE_LABEL.off
+  const voiceSub = voiceState === "off" ? (demoMode ? "Tap to hear the demo portfolio briefing" : STATE_LABEL.off)
     : voiceState === "thinking" && lastTool ? lastTool.replace(/_/g, " ")
     : voiceState === "error" ? (voiceError ?? "error")
     : textMode ? "Text mode · tap to use mic"
@@ -156,7 +222,14 @@ export function Hud() {
               <button className="btn ghost sm" onClick={() => void auth.logout()}>Sign out</button>
             </>
           ) : (
-            <button className="btn primary sm" onClick={auth.login} disabled={!auth.ready}>{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in"}</button>
+            <>
+              {demoMode ? (
+                <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings())} title={`Public demo wallet ${DEMO_WALLET?.slice(0, 4)}…${DEMO_WALLET?.slice(-4)}. Read-only: sign in to trade your own wallet.`} style={{ borderColor: "rgba(255,178,32,0.5)" }}>
+                  <i className="dot warn" />Demo portfolio · read-only{portfolio ? ` · ${fmtUsd(portfolio.totalValueUsd)}` : ""}
+                </button>
+              ) : null}
+              <button className="btn primary sm" onClick={auth.login} disabled={!auth.ready}>{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in"}</button>
+            </>
           )}
         </div>
       </div>
@@ -166,7 +239,10 @@ export function Hud() {
       {/* ---------- stage ---------- */}
       <div className={`stage ${showPanel ? "" : "no-panel"}`}>
         <div className="left">
-          {view !== "world" || comparison || showPortfolio ? (
+          {/* Phones: the rising panel covers the second row, so the trail wins there (the panel repeats the session). */}
+          {!(narrow && showCrumbs) ? <SessionPill /> : null}
+          {!(narrow && showCrumbs) ? <VerifiedOnMainnet /> : null}
+          {showCrumbs ? (
             <nav className="crumbs clickable" aria-label="Where you are">
               <button className="crumb-back" onClick={goBack} title="Back" aria-label="Back"><ChevronLeftIcon size={16} /></button>
               <button className="crumb" onClick={() => resetGlobe(false)}><GlobeIcon size={14} />World</button>
@@ -192,6 +268,14 @@ export function Hud() {
               </div>
             ))}
           </div>
+          {!captions.length ? (
+            <div className="row clickable" style={{ gap: 6, flexWrap: "wrap" }}>
+              {showDemoChip ? <button type="button" className="chip" onClick={hearDemo} title="A public wallet's real portfolio, read-only, no sign-in" style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 11.5, whiteSpace: "normal", textAlign: "left", borderColor: "rgba(20,241,149,0.45)" }}>▶ Hear the demo portfolio briefing</button> : null}
+              {SUGGESTIONS.map((q) => (
+                <button key={q} type="button" className="chip" onClick={() => sendText(q, auth)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 11.5, whiteSpace: "normal", textAlign: "left" }}>{q}</button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {showPanel ? (
@@ -226,7 +310,7 @@ export function Hud() {
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>{heatEntries.length ? "Portfolio geography" : news?.target ?? "Research"}</h2><div className="sub">{heatEntries.length ? "exposure by country" : "sources"}</div></div><button className="btn ghost sm" onClick={() => resetGlobe(true)}>✕</button></div>
                 <div className="panel-body scroll">
-                  {heatEntries.length ? <dl className="kv" style={{ marginBottom: 10 }}>{heatEntries.map(([k, v]) => <><dt key={`${k}d`}>{COUNTRIES[k as keyof typeof COUNTRIES]?.name ?? k}</dt><dd key={`${k}v`}>{((v ?? 0) * 100).toFixed(0)}%</dd></>)}</dl> : null}
+                  {heatEntries.length ? <dl className="kv" style={{ marginBottom: 10 }}>{heatEntries.map(([k, v]) => <Fragment key={k}><dt>{COUNTRIES[k as keyof typeof COUNTRIES]?.name ?? k}</dt><dd>{((v ?? 0) * 100).toFixed(0)}%</dd></Fragment>)}</dl> : null}
                   {impact ? <ImpactCard impact={impact} /> : null}
                   {news ? <NewsCards items={news.items} /> : null}
                 </div>
@@ -249,7 +333,7 @@ export function Hud() {
           {voiceState !== "off" && voiceState !== "connecting" ? <button className="btn ghost sm" onClick={disconnect}>End</button> : null}
         </div>
         <form className="row clickable ask" onSubmit={(e) => { e.preventDefault(); const q = text.trim(); if (!q) return; sendText(q, auth); setText(""); }}>
-          <input className="chip ask-input" placeholder={`Ask Rhea… e.g. "What's happening in China?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />
+          <input className="chip ask-input" placeholder={`Ask Rhea… e.g. "Why is Nvidia moving?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />
           <button className="btn sm" type="submit">Ask</button>
         </form>
       </div>
@@ -267,7 +351,9 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
   const loadPortfolio = useMarket((s) => s.loadPortfolio);
   const focusCompany = useWorld((s) => s.focusCompany);
   const setCountryHeat = useWorld((s) => s.setCountryHeat);
-  const auth = useAuth();
+  /* The store wallet, not auth.address: in ?demo=1 it is the read-only demo wallet. */
+  const wallet = useMarket((s) => s.wallet);
+  const demoMode = useMarket((s) => s.demoMode);
   useEffect(() => { void loadPortfolio(); }, [loadPortfolio]);
   const byCountry = new Map<string, number>();
   for (const p of portfolio?.positions ?? []) { const cc = COMPANY_BY_ID[p.companyId].countryCode; byCountry.set(cc, (byCountry.get(cc) ?? 0) + (p.valueUsd ?? 0)); }
@@ -275,7 +361,7 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
   return (
     <div className="panel clickable">
       <div className="panel-head">
-        <div><h2>Portfolio</h2><div className="sub">{auth.address ? `${auth.address.slice(0, 6)}…${auth.address.slice(-6)}` : ""} · Solana</div></div>
+        <div><h2>{demoMode ? "Demo portfolio" : "Portfolio"}</h2><div className="sub">{wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-6)}` : ""} · Solana{demoMode ? " · read-only" : ""}</div></div>
         <div className="row"><button className="btn ghost sm" onClick={() => { setCountryHeat(Object.fromEntries([...byCountry].map(([k, v]) => [k, v / total]))); useWorld.getState().resetGlobe(false); }}>Show on Earth</button><button className="btn ghost sm" onClick={onClose}>✕</button></div>
       </div>
       <div className="panel-body scroll">
@@ -293,9 +379,9 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
               <div className="mono">{fmtUsd(p.valueUsd)}</div>
             </div>
           ))}
-          {portfolio && !portfolio.positions.length ? <div className="hint">No tokenized stocks yet. Fund the wallet with USDC on Solana, then ask Rhea to buy.</div> : null}
+          {portfolio && !portfolio.positions.length && !demoMode ? <div className="hint">No tokenized stocks yet. Fund the wallet with USDC on Solana, then ask Rhea to buy.</div> : null}
         </div>
-        {byCountry.size ? (<><div className="divider" /><div className="hint">GEOGRAPHY</div><dl className="kv">{[...byCountry].map(([k, v]) => <><dt key={k}>{COUNTRIES[k as keyof typeof COUNTRIES].name}</dt><dd key={`${k}v`}>{((v / total) * 100).toFixed(0)}%</dd></>)}</dl></>) : null}
+        {byCountry.size ? (<><div className="divider" /><div className="hint">GEOGRAPHY</div><dl className="kv">{[...byCountry].map(([k, v]) => <Fragment key={k}><dt>{COUNTRIES[k as keyof typeof COUNTRIES].name}</dt><dd>{((v / total) * 100).toFixed(0)}%</dd></Fragment>)}</dl></>) : null}
         {orders.filter((o) => o.status === "active").length ? (<><div className="divider" /><div className="hint">ACTIVE RULES</div>{orders.filter((o) => o.status === "active").map((o) => <div key={o.id} className="hint" style={{ color: "#ffd24a" }}>◉ {COMPANY_BY_ID[o.companyId].tokenSymbol}: {o.action.side} {o.action.side === "buy" ? fmtUsd(o.action.amount) : o.action.amount} when {o.condition.kind === "price_below" ? "≤" : "≥"} {fmtUsd(o.condition.priceUsd)}{o.simulated ? " (simulated)" : ""}</div>)}</>) : null}
         {trades.length ? (<><div className="divider" /><div className="hint">ORDER HISTORY</div>{trades.slice(0, 6).map((t) => <div key={t.id} className="hint">{t.side} {t.amount} {t.currency} {COMPANY_BY_ID[t.companyId].tokenSymbol} · {t.status}</div>)}</>) : null}
       </div>

@@ -25,7 +25,56 @@ const allowedOrigins = (process.env.CORS_ORIGIN || "")
   .filter(Boolean);
 
 app.disable("x-powered-by");
+/* Railway puts one proxy hop in front of us; without this every visitor shares
+ * the proxy's IP and the per-IP voice limit below would be global. */
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "256kb" }));
+
+/* ---- Voice session limiter ----
+ * Each POST /api/live/session opens a paid GPT-Live session, and the demo is
+ * public and logged-out. In-memory is enough for one Railway replica: a restart
+ * resets the counters, which only errs towards letting people talk. */
+const LIVE_PER_IP_HOUR = Number(process.env.LIVE_SESSION_PER_IP_HOUR) || 10;
+const LIVE_DAILY_CAP = Number(process.env.LIVE_SESSION_DAILY_CAP) || 400;
+const HOUR_MS = 3_600_000;
+const MAX_TRACKED_IPS = 10_000;
+const liveHits = new Map<string, { hits: number[]; warned: boolean }>();
+const liveDay = { day: "", count: 0, warned: false };
+
+function pruneLiveHits(now: number) {
+  for (const [ip, e] of liveHits) if (!e.hits.length || now - e.hits[e.hits.length - 1] >= HOUR_MS) liveHits.delete(ip);
+  /* Still too many (a spray of unique IPs): drop the oldest-inserted entries. */
+  for (const ip of liveHits.keys()) { if (liveHits.size <= MAX_TRACKED_IPS) break; liveHits.delete(ip); }
+}
+setInterval(() => pruneLiveHits(Date.now()), 10 * 60_000).unref();
+
+const liveSessionLimiter: express.RequestHandler = (req, res, next) => {
+  const now = Date.now();
+  const day = new Date(now).toISOString().slice(0, 10); // UTC day
+  if (liveDay.day !== day) Object.assign(liveDay, { day, count: 0, warned: false });
+  if (liveDay.count >= LIVE_DAILY_CAP) {
+    if (!liveDay.warned) { liveDay.warned = true; console.warn(`[limit] live session daily cap ${LIVE_DAILY_CAP} reached for ${day} UTC`); }
+    res.setHeader("Retry-After", String(Math.ceil((Date.parse(`${day}T00:00:00Z`) + 24 * HOUR_MS - now) / 1000)));
+    res.status(429).json({ error: "Rhea's voice has reached today's session limit, so please come back tomorrow; the globe still works without voice." });
+    return;
+  }
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const entry = liveHits.get(ip) ?? { hits: [], warned: false };
+  entry.hits = entry.hits.filter((t) => now - t < HOUR_MS);
+  if (entry.hits.length >= LIVE_PER_IP_HOUR) {
+    if (!entry.warned) { entry.warned = true; console.warn(`[limit] live session per-IP limit ${LIVE_PER_IP_HOUR}/h hit by ${ip}`); }
+    liveHits.set(ip, entry);
+    res.setHeader("Retry-After", String(Math.ceil((entry.hits[0] + HOUR_MS - now) / 1000)));
+    res.status(429).json({ error: "You've started a lot of voice sessions this hour, so please wait a little while before starting another." });
+    return;
+  }
+  entry.hits.push(now);
+  entry.warned = false;
+  liveHits.set(ip, entry);
+  liveDay.count += 1;
+  if (liveHits.size > MAX_TRACKED_IPS) pruneLiveHits(now);
+  next();
+};
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -42,7 +91,7 @@ app.use((req, res, next) => {
 
 app.get("/", (_req, res) => res.json({ service: "rhea-api", ok: true, health: "/api/health" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true, at: new Date().toISOString() }));
-app.post("/api/live/session", createLiveSession);
+app.post("/api/live/session", liveSessionLimiter, createLiveSession);
 app.use("/api/market", marketRouter());
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -52,6 +101,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 
 app.listen(port, "0.0.0.0", () => {
   console.log(`[rhea] api listening on http://0.0.0.0:${port} (${isProd ? "production" : "development"})`);
+  console.log(`[rhea] voice sessions limited to ${LIVE_PER_IP_HOUR}/IP/hour and ${LIVE_DAILY_CAP}/UTC day`);
   console.log(`[rhea] CORS ${allowedOrigins.length ? allowedOrigins.join(", ") : "any origin (set CORS_ORIGIN to lock it down)"}`);
   console.log(`[rhea] OpenAI ${process.env.OPENAI_API_KEY ? "✓" : "✗ (set OPENAI_API_KEY)"} · Jupiter key ${process.env.JUPITER_API_KEY ? "✓" : "– (keyless lite-api)"} · Pyth Pro ${process.env.PYTH_PRO_API_KEY ? "✓" : "– (Yahoo fallback)"}`);
   /* Warm the asset cache: pricing the full 715-token catalog takes ~5s keyless,
