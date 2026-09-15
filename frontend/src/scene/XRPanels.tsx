@@ -10,7 +10,7 @@
 import { Text } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useXR, useXRInputSourceState } from "@react-three/xr";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import type { ChartRange } from "@shared/types";
@@ -34,28 +34,155 @@ const RANGES: ChartRange[] = ["1D", "5D", "1M", "1Y"];
 
 const OUTLINE = { outlineWidth: 0.0035, outlineColor: "#05060d", outlineOpacity: 0.9 } as const;
 
-/** Pill button: thin luminous border, faint fill, haloed label. */
+/* ---------------- Buttons ---------------- */
+
+const PILL_H = 0.066;
+const PANEL_DARK = new THREE.Color("#0b0f1c");
+
+/** Traces a centred rounded rectangle onto a Shape or hole Path. */
+function traceRoundRect<T extends THREE.Path>(p: T, w: number, h: number, r: number): T {
+  const x = -w / 2, y = -h / 2;
+  r = Math.min(r, w / 2, h / 2);
+  p.moveTo(x + r, y);
+  p.lineTo(x + w - r, y); p.absarc(x + w - r, y + r, r, -Math.PI / 2, 0, false);
+  p.lineTo(x + w, y + h - r); p.absarc(x + w - r, y + h - r, r, 0, Math.PI / 2, false);
+  p.lineTo(x + r, y + h); p.absarc(x + r, y + h - r, r, Math.PI / 2, Math.PI, false);
+  p.lineTo(x, y + r); p.absarc(x + r, y + r, r, Math.PI, Math.PI * 1.5, false);
+  return p;
+}
+
+function roundRectGeo(w: number, h: number, r: number) {
+  return new THREE.ShapeGeometry(traceRoundRect(new THREE.Shape(), w, h, r), 10);
+}
+
+/** A rounded-rect outline of the given stroke width (outer shape minus an inset hole). */
+function roundRingGeo(w: number, h: number, r: number, stroke: number) {
+  const s = traceRoundRect(new THREE.Shape(), w, h, r);
+  s.holes.push(traceRoundRect(new THREE.Path(), w - stroke * 2, h - stroke * 2, Math.max(0, r - stroke)));
+  return new THREE.ShapeGeometry(s, 10);
+}
+
+/** Paints a vertical gradient into a flat geometry's vertex colours. */
+function paintGradient(geo: THREE.BufferGeometry, h: number, top: THREE.Color, bottom: THREE.Color) {
+  const pos = geo.getAttribute("position");
+  const cols = new Float32Array(pos.count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    c.copy(bottom).lerp(top, THREE.MathUtils.clamp(pos.getY(i) / h + 0.5, 0, 1));
+    cols.set([c.r, c.g, c.b], i * 3);
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+  return geo;
+}
+
+/** Shared hover/press spring: eases scale, lift and glow toward their targets. */
+function useButtonSpring(opts: { disabled?: boolean; active?: boolean }) {
+  const group = useRef<THREE.Group>(null);
+  const glow = useRef<THREE.MeshBasicMaterial>(null);
+  const halo = useRef<THREE.MeshBasicMaterial>(null);
+  const fill = useRef<THREE.MeshBasicMaterial>(null);
+  const hover = useRef(false);
+  const pressed = useRef(false);
+  const g = useRef(0);
+  useFrame((_, dt) => {
+    const k = 1 - Math.exp(-Math.min(dt, 0.1) * 16);
+    const hot = !opts.disabled && hover.current;
+    const down = !opts.disabled && pressed.current;
+    const s = down ? 0.95 : hot ? 1.06 : 1;
+    const target = opts.disabled ? 0 : down ? 1 : opts.active ? 0.75 : hot ? 0.85 : 0.18;
+    g.current += (target - g.current) * k;
+    const grp = group.current;
+    if (grp) {
+      grp.scale.setScalar(grp.scale.x + (s - grp.scale.x) * k);
+      grp.position.z += ((hot && !down ? 0.012 : 0) - grp.position.z) * k;
+    }
+    if (glow.current) glow.current.opacity = g.current * 0.32;
+    if (halo.current) halo.current.opacity = g.current * 0.12;
+    if (fill.current) fill.current.opacity = opts.disabled ? 0.3 : 0.78 + g.current * 0.2;
+  });
+  return { group, glow, halo, fill, hover, pressed };
+}
+
+/** Pill button: rounded, gradient-filled, luminous rim, glow that blooms on hover and press. */
 function Pill({ position, label, accent = C.cyan, w = 0.2, onClick, onHoldStart, onHoldEnd, disabled, active }: { position: [number, number, number]; label: string; accent?: string; w?: number; onClick?: () => void; /** press-and-hold (pinch or trigger held) */ onHoldStart?: () => void; onHoldEnd?: () => void; disabled?: boolean; active?: boolean }) {
-  const [hover, setHover] = useState(false);
   const stop = (e: ThreeEvent<PointerEvent | MouseEvent>) => e.stopPropagation();
-  const edges = useMemo(() => new THREE.EdgesGeometry(new THREE.PlaneGeometry(w, 0.066)), [w]);
+  const spring = useButtonSpring({ disabled, active });
+  const h = PILL_H, r = h / 2;
+  const geos = useMemo(() => {
+    const acc = new THREE.Color(accent);
+    return {
+      fill: paintGradient(roundRectGeo(w, h, r), h, PANEL_DARK.clone().lerp(acc, active ? 0.7 : 0.26), PANEL_DARK.clone().lerp(acc, active ? 0.38 : 0.04)),
+      rim: roundRingGeo(w, h, r, 0.0032),
+      sheen: roundRectGeo(w - r, 0.004, 0.002),
+      glow: roundRectGeo(w + 0.022, h + 0.022, r + 0.011),
+      halo: roundRectGeo(w + 0.056, h + 0.056, r + 0.028),
+    };
+  }, [w, h, r, accent, active]);
+  useEffect(() => () => Object.values(geos).forEach((g) => g.dispose()), [geos]);
+  const additive = { transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending } as const;
   return (
     <group position={position}>
-      <mesh
-        onClick={(e) => { stop(e); if (!disabled) onClick?.(); }}
-        onPointerDown={onHoldStart ? (e) => { stop(e); if (!disabled) onHoldStart(); } : undefined}
-        onPointerUp={onHoldEnd ? (e) => { stop(e); onHoldEnd(); } : undefined}
-        onPointerOver={(e) => { stop(e); setHover(true); }}
-        onPointerOut={() => { setHover(false); onHoldEnd?.(); }}>
-        <planeGeometry args={[w, 0.066]} />
-        <meshBasicMaterial color={active ? accent : "#0b0f1c"} transparent opacity={disabled ? 0.25 : active ? 0.55 : hover ? 0.75 : 0.55} toneMapped={false} depthWrite={false} />
-      </mesh>
-      <lineSegments geometry={edges} position={[0, 0, 0.001]}>
-        <lineBasicMaterial color={accent} transparent opacity={disabled ? 0.3 : 1} toneMapped={false} />
-      </lineSegments>
-      <Text position={[0, 0, 0.002]} fontSize={0.024} color={disabled ? "#7f93ab" : "#ffffff"} anchorX="center" anchorY="middle" letterSpacing={0.1} {...OUTLINE}>
-        {label.toUpperCase()}
-      </Text>
+      <group ref={spring.group}>
+        <mesh geometry={geos.halo} position={[0, 0, -0.002]} raycast={NO_RAYCAST}>
+          <meshBasicMaterial ref={spring.halo} color={accent} opacity={0} {...additive} />
+        </mesh>
+        <mesh geometry={geos.glow} position={[0, 0, -0.001]} raycast={NO_RAYCAST}>
+          <meshBasicMaterial ref={spring.glow} color={accent} opacity={0} {...additive} />
+        </mesh>
+        <mesh
+          geometry={geos.fill}
+          onClick={(e) => { stop(e); if (!disabled) onClick?.(); }}
+          onPointerDown={(e) => { stop(e); spring.pressed.current = true; if (!disabled) onHoldStart?.(); }}
+          onPointerUp={(e) => { stop(e); spring.pressed.current = false; onHoldEnd?.(); }}
+          onPointerOver={(e) => { stop(e); spring.hover.current = true; }}
+          onPointerOut={() => { spring.hover.current = false; spring.pressed.current = false; onHoldEnd?.(); }}>
+          <meshBasicMaterial ref={spring.fill} vertexColors transparent opacity={0.8} toneMapped={false} depthWrite={false} />
+        </mesh>
+        <mesh geometry={geos.rim} position={[0, 0, 0.001]} raycast={NO_RAYCAST}>
+          <meshBasicMaterial color={accent} transparent opacity={disabled ? 0.28 : 1} toneMapped={false} depthWrite={false} />
+        </mesh>
+        {/* glassy highlight along the top edge */}
+        <mesh geometry={geos.sheen} position={[0, h / 2 - 0.009, 0.0015]} raycast={NO_RAYCAST}>
+          <meshBasicMaterial color="#ffffff" transparent opacity={disabled ? 0.05 : active ? 0.35 : 0.16} toneMapped={false} depthWrite={false} />
+        </mesh>
+        <Text position={[0, -0.001, 0.003]} fontSize={0.022} color={disabled ? "#6f8196" : "#ffffff"} anchorX="center" anchorY="middle" letterSpacing={0.09} fontWeight={700} raycast={NO_RAYCAST} {...OUTLINE}>
+          {label.toUpperCase()}
+        </Text>
+      </group>
+    </group>
+  );
+}
+
+/** Tappable list row (country panel): rounded glass strip with an accent bar that lights on hover. */
+function RowButton({ position, w, h, accent = C.cyan, onClick, children }: { position: [number, number, number]; w: number; h: number; accent?: string; onClick: () => void; children: ReactNode }) {
+  const spring = useButtonSpring({});
+  const bar = useRef<THREE.MeshBasicMaterial>(null);
+  const geos = useMemo(() => ({
+    fill: paintGradient(roundRectGeo(w, h, 0.012), h, PANEL_DARK.clone().lerp(new THREE.Color(accent), 0.12), PANEL_DARK.clone()),
+    rim: roundRingGeo(w, h, 0.012, 0.0022),
+    bar: roundRectGeo(0.005, h * 0.6, 0.0025),
+  }), [w, h, accent]);
+  useEffect(() => () => Object.values(geos).forEach((g) => g.dispose()), [geos]);
+  useFrame(() => { if (bar.current && spring.glow.current) bar.current.opacity = 0.25 + spring.glow.current.opacity * 2.3; });
+  return (
+    <group position={position}>
+      <group ref={spring.group}>
+        <mesh geometry={geos.fill}
+          onClick={(e) => { e.stopPropagation(); onClick(); }}
+          onPointerDown={(e) => { e.stopPropagation(); spring.pressed.current = true; }}
+          onPointerUp={() => { spring.pressed.current = false; }}
+          onPointerOver={(e) => { e.stopPropagation(); spring.hover.current = true; }}
+          onPointerOut={() => { spring.hover.current = false; spring.pressed.current = false; }}>
+          <meshBasicMaterial ref={spring.fill} vertexColors transparent opacity={0.6} toneMapped={false} depthWrite={false} />
+        </mesh>
+        <mesh geometry={geos.rim} position={[0, 0, 0.0005]} raycast={NO_RAYCAST}>
+          <meshBasicMaterial ref={spring.glow} color={accent} transparent opacity={0} toneMapped={false} depthWrite={false} />
+        </mesh>
+        <mesh geometry={geos.bar} position={[-w / 2 + 0.012, 0, 0.001]} raycast={NO_RAYCAST}>
+          <meshBasicMaterial ref={bar} color={accent} transparent opacity={0.25} toneMapped={false} depthWrite={false} />
+        </mesh>
+        {children}
+      </group>
     </group>
   );
 }
@@ -262,11 +389,10 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
       {ids.map((id, i) => {
         const co = COMPANY_BY_ID[id]; const p = prices[id]; const ch = p?.change24hPct ?? null;
         return (
-          <group key={id} position={[0, top - 0.03 - i * 0.052, 0.002]}>
-            <mesh onClick={(e) => { e.stopPropagation(); useWorld.getState().focusCompany(id); }}><planeGeometry args={[0.8, 0.046]} /><meshBasicMaterial color="#0b0f1c" transparent opacity={0.5} toneMapped={false} depthWrite={false} /></mesh>
-            <Label position={[-0.38, 0, 0.001]} text={`${co.name}  ${co.ticker}`} size={0.022} color="#ffffff" />
-            <Label position={[0.38, 0, 0.001]} text={`${fmtUsd(p?.tokenPriceUsd)}  ${fmtPct(ch)}`} size={0.022} color={ch == null ? "#ffffff" : ch >= 0 ? C.solGreen : C.magenta} anchorX="right" />
-          </group>
+          <RowButton key={id} position={[0, top - 0.03 - i * 0.052, 0.002]} w={0.8} h={0.046} onClick={() => useWorld.getState().focusCompany(id)}>
+            <Label position={[-0.365, 0, 0.002]} text={`${co.name}  ${co.ticker}`} size={0.022} color="#ffffff" />
+            <Label position={[0.38, 0, 0.002]} text={`${fmtUsd(p?.tokenPriceUsd)}  ${fmtPct(ch)}`} size={0.022} color={ch == null ? "#ffffff" : ch >= 0 ? C.solGreen : C.magenta} anchorX="right" />
+          </RowButton>
         );
       })}
       {headlines.length ? <Label position={[-0.4, listEnd - 0.01, 0]} text={`NEWS · ${cd.name.toUpperCase()}`} size={0.017} color={C.frost} /> : null}
