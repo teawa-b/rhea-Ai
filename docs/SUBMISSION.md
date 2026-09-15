@@ -6,33 +6,21 @@
 
 ## Project description
 
-### Explore the market. Ask anything. Act onchain.
+## Why I built Rhea
 
-**Rhea** is an AI-native spatial market interface for tokenized stocks on Solana. Instead of searching through rows of charts and disconnected news, users explore the market on a 3D globe and speak naturally to Rhea.
+Following a market story usually means jumping between a news site, a chart and a trading app. Even then, you are left to work out how an event in one country might affect a company somewhere else.
 
-The interface moves with the conversation. Rhea can:
+I built **Rhea** because I wanted that process to feel more direct. Rhea is a spatial interface for tokenized stocks on Solana. You explore the market on a 3D globe and ask questions by voice. Ask what is happening in China and the globe moves there, showing the stocks and recent news. Ask how it could affect Nvidia and Rhea draws the link, takes you to the company and opens its chart.
 
-- Focus the globe on a country or company
-- Find and surface cited market news
-- Place a news event on a live price chart
-- Visualise relationships between countries, events and stocks
-- Prepare a swap or conditional order for the user to review and approve
+Rhea finds cited news, marks events on price charts and prepares swaps or conditional orders. Every trade stops at a preview so the user can check the details, confirm and sign with their own wallet.
 
-### Built for informed action
+## Why Solana
 
-Rhea separates the **underlying equity price** from the **executable onchain token price**, shows the source and age of market data, highlights corporate actions, and checks asset eligibility before preparing a transaction.
+Rhea finds the tokenized stocks currently available through Jupiter. It keeps the underlying share price separate from the price available onchain, and shows where each number came from and how recent it is. Trades go through **Jupiter Swap**, conditional orders use **Jupiter Trigger**, and portfolio balances come from Solana RPC.
 
-Tokenized stocks are discovered through Jupiter on Solana. Rhea uses **Jupiter Swap** for execution and **Jupiter Trigger** for conditional orders. The AI can research and prepare an action, but it cannot approve or sign on the user's behalf.
+I am building **OtherChains** through Shroozy Studios. It is my spatial Web3 venture, focused on wallets, onchain agents and financial interfaces that you can speak to and see around you. Most of that work has been on Base. I was waiting for a Solana idea that made sense for the kind of interfaces I build, and tokenized stocks were it. They turn news, geography and markets into something that works naturally in a visual space.
 
-### Why we are expanding OtherChains to Solana
-
-Rhea grew from our work on **OtherChains**, a spatial Web3 venture within Shroozy Studios. OtherChains explores wallets, onchain agents and financial interfaces that people can speak to, look at and move through.
-
-Our earlier work has focused on the Base ecosystem, and we have been looking for the right opportunity to expand OtherChains into Solana. Tokenized stocks provide that opportunity: they connect global markets, useful onchain infrastructure and a clear consumer problem that benefits from a spatial, conversational interface.
-
-### What comes next
-
-Stocklana is the starting point for Rhea. We plan to keep developing the product and enter it in **Colosseum's Crypto World's Fair**, using that next stage to strengthen the live experience, validate the core research-to-action workflow and explore Rhea as a lasting Solana product.
+I plan to keep working on Rhea after Stocklana and enter it in **Colosseum's Crypto World's Fair**. That gives me a next deadline to improve the live experience, test the research-to-trade flow with more people and see whether Rhea can grow into a useful Solana product.
 
 ## Why Solana is fundamental
 - The assets are xStocks — tokenized equities that already trade on Solana (discovered live via Jupiter's Tokens API).
