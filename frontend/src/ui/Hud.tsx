@@ -88,7 +88,15 @@ function VerifiedOnMainnet() {
 function useNarrow() {
   const q = "(max-width: 600px)";
   const [narrow, setNarrow] = useState(() => window.matchMedia(q).matches);
-  useEffect(() => { const mq = window.matchMedia(q); const on = () => setNarrow(mq.matches); mq.addEventListener("change", on); return () => mq.removeEventListener("change", on); }, []);
+  /* Also on resize: rotating a phone fires the media query, but a desktop
+   * window dragged across the breakpoint does not always. */
+  useEffect(() => {
+    const mq = window.matchMedia(q);
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener("change", on);
+    window.addEventListener("resize", on);
+    return () => { mq.removeEventListener("change", on); window.removeEventListener("resize", on); };
+  }, []);
   return narrow;
 }
 
@@ -96,6 +104,24 @@ function useNarrow() {
 const SUGGESTIONS = ["What changed while the market was closed?", "Why is Nvidia moving?"];
 
 const STATE_LABEL: Record<string, string> = { off: "Tap to talk to Rhea", connecting: "Connecting…", idle: "Listening", listening: "Hearing you…", thinking: "Researching…", speaking: "Speaking", error: "Voice error" };
+
+/* One line naming whatever the panel would have shown, for the collapsed peek bar. */
+function peekTitle(a: {
+  focusedCompany: string | null; focusedCountry: string | null; focusedRegion: string | null;
+  comparison: { companyIds: string[] } | null; showPortfolio: boolean; demoMode: boolean;
+  privateMarkets: boolean; dbcStudio: string | null;
+  newsTarget: string | null; heat: boolean;
+}): string {
+  if (a.showPortfolio) return a.demoMode ? "Demo portfolio" : "Portfolio";
+  if (a.privateMarkets) return "Pre-IPO markets";
+  if (a.dbcStudio != null) { const co = a.dbcStudio ? COMPANY_BY_ID[a.dbcStudio] : null; return co ? `Curve studio · ${co.name}` : "Curve studio"; }
+  if (a.comparison) return `Compare ${a.comparison.companyIds.length} companies`;
+  if (a.focusedCompany) { const co = COMPANY_BY_ID[a.focusedCompany]; return co ? `${co.name} · ${co.ticker}` : "Company"; }
+  if (a.focusedCountry) return COUNTRIES[a.focusedCountry as keyof typeof COUNTRIES]?.name ?? "Country";
+  if (a.focusedRegion) return REGION_BY_ID[a.focusedRegion]?.name ?? "Region";
+  if (a.heat) return "Portfolio geography";
+  return a.newsTarget ?? "Research";
+}
 
 export function Hud() {
   const auth = useAuth();
@@ -123,6 +149,8 @@ export function Hud() {
   const focusCompany = useWorld((s) => s.focusCompany);
   const focusCountry = useWorld((s) => s.focusCountry);
   const panelReady = useWorld((s) => s.panelReady);
+  const panelOpen = useWorld((s) => s.panelOpen);
+  const setPanelOpen = useWorld((s) => s.setPanelOpen);
   /* The portfolio panel rides along with the holdings planet. */
   const showPortfolio = useWorld((s) => s.vault);
   const showHoldings = useWorld((s) => s.showHoldings);
@@ -211,7 +239,12 @@ export function Hud() {
   const preIpoCount = overview?.assets.filter((a) => a.issuerKey === "prestocks").length ?? 0;
 
   const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || privateMarkets || dbcStudio != null || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
-  const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };
+  const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry, "user"); else resetGlobe(false); };
+  /* Trades, orders and the sign-in / deposit gates are things the user must act
+   * on, so they always open. Everything else is browsing: on a phone it waits
+   * behind a peek bar unless the user asked for it by tapping. */
+  const mustAct = Boolean(pendingTrade || pendingOrder || gatePanel);
+  const collapsed = narrow && Boolean(showPanel) && !mustAct && !panelOpen;
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
 
   return (
@@ -245,14 +278,14 @@ export function Hud() {
           {status && !status.openai ? <span className="chip dim" title="Set OPENAI_API_KEY on the server"><i className="dot err" />voice offline</span> : null}
           <button
             className={`chip clickable${privateMarkets ? " sol" : ""}`}
-            onClick={() => (privateMarkets ? showPrivateMarkets(false) : showPrivateMarkets(true))}
+            onClick={() => (privateMarkets ? showPrivateMarkets(false) : showPrivateMarkets(true, "user"))}
             title="Pre-IPO companies: what the issuer marks them at, and what the onchain market pays"
           >
             Pre-IPO
           </button>
           {auth.authenticated ? (
             <>
-              <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings())} title={showPortfolio ? "Back to Earth" : "Fly to your holdings"}>
+              <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings("user"))} title={showPortfolio ? "Back to Earth" : "Fly to your holdings"}>
                 <i className="dot on" />{portfolio ? fmtUsd(portfolio.totalValueUsd) : "…"} · {auth.displayName}
               </button>
               <button className="btn ghost sm" onClick={() => void auth.logout()}>Sign out</button>
@@ -260,7 +293,7 @@ export function Hud() {
           ) : (
             <>
               {demoMode ? (
-                <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings())} title={`Public demo wallet ${DEMO_WALLET?.slice(0, 4)}…${DEMO_WALLET?.slice(-4)}. Read-only: sign in to trade your own wallet.`} style={{ borderColor: "rgba(255,178,32,0.5)" }}>
+                <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings("user"))} title={`Public demo wallet ${DEMO_WALLET?.slice(0, 4)}…${DEMO_WALLET?.slice(-4)}. Read-only: sign in to trade your own wallet.`} style={{ borderColor: "rgba(255,178,32,0.5)" }}>
                   <i className="dot warn" />Demo portfolio · read-only{portfolio ? ` · ${fmtUsd(portfolio.totalValueUsd)}` : ""}
                 </button>
               ) : null}
@@ -288,7 +321,7 @@ export function Hud() {
                 <>
                   <span className="crumb-sep" aria-hidden>›</span>
                   {focusedCompany
-                    ? <button className="crumb" onClick={() => focusCountry(focusedCountry)}>{COUNTRIES[focusedCountry].name}</button>
+                    ? <button className="crumb" onClick={() => focusCountry(focusedCountry, "user")}>{COUNTRIES[focusedCountry].name}</button>
                     : <span className="crumb current" aria-current="page">{COUNTRIES[focusedCountry].name}</span>}
                 </>
               ) : null}
@@ -315,8 +348,22 @@ export function Hud() {
           ) : null}
         </div>
 
-        {showPanel ? (
+        {collapsed ? (
+          <button type="button" className="peek clickable" onClick={() => setPanelOpen(true)} aria-expanded={false}>
+            <span className="peek-grip" aria-hidden />
+            <span className="peek-text">
+              <b>{peekTitle({ focusedCompany, focusedCountry, focusedRegion, comparison, showPortfolio, demoMode, privateMarkets, dbcStudio, newsTarget: news?.target ?? null, heat: heatEntries.length > 0 })}</b>
+              <small>Tap for details</small>
+            </span>
+            <span className="peek-chevron" aria-hidden>⌃</span>
+          </button>
+        ) : null}
+
+        {showPanel && !collapsed ? (
           <div className="right">
+            {narrow && !mustAct ? (
+              <button type="button" className="peek-collapse clickable" onClick={() => setPanelOpen(false)} title="Hide panel" aria-label="Hide panel"><span className="peek-grip" aria-hidden /></button>
+            ) : null}
             {pendingTrade ? <TradePanel /> : null}
             {pendingOrder ? <OrderPanel /> : null}
             {gatePanel ? (depositPrompt ? <DepositPanel /> : <LoginPanel />) : null}
@@ -329,7 +376,7 @@ export function Hud() {
                     {comparison.companyIds.map((id) => {
                       const co = COMPANY_BY_ID[id]; const p = prices[id]; const ch = p?.change24hPct ?? null;
                       return (
-                        <div key={id} className="item" onClick={() => focusCompany(id)}>
+                        <div key={id} className="item" onClick={() => focusCompany(id, "user")}>
                           <CoLogo id={id} />
                           <div className="grow"><div className="name">{co.name} <span className="muted">{co.ticker}</span></div><div className="meta">{co.sector} · {COUNTRIES[co.countryCode].name}</div></div>
                           <div style={{ textAlign: "right" }}><div className="mono">{fmtUsd(p?.tokenPriceUsd)}</div><div className={`mono ${ch == null ? "" : ch >= 0 ? "pos" : "neg"}`} style={{ fontSize: 11 }}>{fmtPct(ch)}</div><div className="hint">stock {fmtUsd(p?.underlyingPriceUsd)}</div></div>
@@ -417,7 +464,7 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
         <div className="divider" />
         <div className="list">
           {(portfolio?.positions ?? []).map((p) => (
-            <div key={p.mint} className="item" onClick={() => focusCompany(p.companyId)}>
+            <div key={p.mint} className="item" onClick={() => focusCompany(p.companyId, "user")}>
               <CoLogo id={p.companyId} />
               <div className="grow"><div className="name">{COMPANY_BY_ID[p.companyId].name}</div><div className="meta">{p.amountUi.toFixed(4)} {p.symbol}</div></div>
               <div className="mono">{fmtUsd(p.valueUsd)}</div>

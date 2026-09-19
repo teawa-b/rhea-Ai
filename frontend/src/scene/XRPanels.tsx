@@ -413,7 +413,7 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
       {ids.map((id, i) => {
         const co = COMPANY_BY_ID[id]; const p = prices[id]; const ch = p?.change24hPct ?? null;
         return (
-          <RowButton key={id} position={[0, top - 0.03 - i * 0.052, 0.002]} w={0.8} h={0.046} onClick={() => useWorld.getState().focusCompany(id)}>
+          <RowButton key={id} position={[0, top - 0.03 - i * 0.052, 0.002]} w={0.8} h={0.046} onClick={() => useWorld.getState().focusCompany(id, "user")}>
             <Label position={[-0.365, 0, 0.002]} text={`${co.name}  ${co.ticker}`} size={0.022} color="#ffffff" />
             <Label position={[0.38, 0, 0.002]} text={`${fmtUsd(p?.tokenPriceUsd)}  ${fmtPct(ch)}`} size={0.022} color={ch == null ? "#ffffff" : ch >= 0 ? C.solGreen : C.magenta} anchorX="right" mono />
           </RowButton>

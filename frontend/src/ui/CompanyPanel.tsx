@@ -167,7 +167,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           <div className="sub">{co.ticker} · {co.sector}</div>
           </div>
         </div>
-        <button className="icon-btn" onClick={() => focusCountry(co.countryCode)} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
+        <button className="icon-btn" onClick={() => focusCountry(co.countryCode, "user")} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
       </div>
       <div className="panel-body scroll">
         {/* Prices.
@@ -321,7 +321,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
               <button className="btn ghost sm" onClick={() => showStreetView(streetView === co.id ? null : co.id)}>{streetView === co.id ? "Hide" : "Street View"}</button>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn ghost sm" onClick={() => showDbcStudio(co.id)} title={`Design a Meteora bonding curve anchored on ${co.name}'s reference price`}>Design a curve</button>
+              <button className="btn ghost sm" onClick={() => showDbcStudio(co.id, "user")} title={`Design a Meteora bonding curve anchored on ${co.name}'s reference price`}>Design a curve</button>
             </div>
             {streetView === co.id ? (
               status?.streetView && !svFailed ? (
