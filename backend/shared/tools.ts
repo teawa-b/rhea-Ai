@@ -54,7 +54,7 @@ export const RHEA_TOOLS: ToolDef[] = [
   {
     type: "function",
     name: "show_holdings",
-    description: "Fly away from Earth to the user's holdings planet: their USDC, SOL and every tokenized-stock position orbit it as labelled moons, with the portfolio panel open. Use for \"show me my holdings / portfolio / wallet / balances\". Returns the balances and positions to speak. reset_globe or any focus_* flies back to Earth.",
+    description: "Fly away from Earth to the user's holdings planet: every tokenized-stock position stands on its surface as a labelled building (the taller the more it is worth) and their USDC and SOL orbit it as little balls, with the portfolio panel open. Use for \"show me my holdings / portfolio / wallet / balances\". Returns the balances and positions to speak. reset_globe or any focus_* flies back to Earth.",
     parameters: obj({}),
   },
   {

@@ -61,7 +61,7 @@ function regionResult(id: string) {
   return { ok: true, region: region.name, markets: markets.map((c) => ({ country: c.name, tradableStocks: c.tradableCount, companies: c.companies.map((cid) => COMPANY_BY_ID[cid]?.name) })) };
 }
 
-/* show_holdings and get_briefing share this: fly to the holdings planet and refresh the balances its moons show. */
+/* show_holdings and get_briefing share this: fly to the holdings planet and refresh the balances its skyline shows. */
 function flyToHoldings() {
   useWorld.getState().showHoldings();
   return useMarket.getState().loadPortfolio();

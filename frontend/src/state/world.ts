@@ -53,7 +53,7 @@ type WorldState = {
   /** False while the camera is still flying to a newly focused place; the side
    * panel waits for arrival so the globe moves first and the panel follows. */
   panelReady: boolean;
-  /** True while the camera is away at the holdings planet (USDC, SOL, stock moons). */
+  /** True while the camera is away at the holdings planet (stock buildings, USDC and SOL in orbit). */
   vault: boolean;
   /** Bumps whenever something the AI should know about changes (for UI context). */
   contextVersion: number;
@@ -287,7 +287,7 @@ export function describeWorld(): string {
   const s = useWorld.getState();
   const parts: string[] = [];
   parts.push(`View: ${s.view}.`);
-  if (s.vault) parts.push("Showing the holdings planet (USDC, SOL and stock positions orbiting it) instead of Earth.");
+  if (s.vault) parts.push("Showing the holdings planet instead of Earth: each stock position is a building on it, USDC and SOL orbit as balls.");
   if (s.focusedRegion) parts.push(`Focused region: ${REGION_BY_ID[s.focusedRegion]?.name}.`);
   if (s.focusedCountry) parts.push(`Focused country: ${COUNTRIES[s.focusedCountry].name}.`);
   if (s.focusedCompany) {
