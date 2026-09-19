@@ -99,10 +99,10 @@ export async function buildOverview(): Promise<MarketOverview> {
 
 export async function buildPrivateMarkets(): Promise<PrivateMarketsOverview> {
   const [assets, marks] = await Promise.all([listTokenizedAssets(), preStocksCatalog()]);
-  const tTokens = assets.filter((a) => a.issuerKey === "prestocks");
+  const preStockAssets = assets.filter((a) => a.issuerKey === "prestocks");
 
   const out: PrivateMarketSnapshot[] = [];
-  for (const a of tTokens) {
+  for (const a of preStockAssets) {
     const co = COMPANY_BY_ID[a.companyId];
     if (!co) continue;
     const mark = marks?.find((m) => m.mint === a.mint) ?? null;

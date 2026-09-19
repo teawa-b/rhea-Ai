@@ -12,7 +12,7 @@ export type IssuerKey = "xstocks" | "prestocks";
 /** A tokenized wrapper beyond the company's primary one. */
 export type CompanyWrapper = {
   issuerKey: IssuerKey;
-  /** Onchain symbol as Jupiter reports it, e.g. "tSpaceX" */
+  /** Onchain symbol as Jupiter reports it, e.g. "NVDAx" */
   tokenSymbol: string;
   mint: string;
 };

@@ -53,7 +53,7 @@ async function companyProfile(q: string) {
     corporateActions: d.corporateActions.map((c) => ({ caType: c.caType ?? c.type, effectiveAt: c.effectiveAt, upcoming: c.upcoming ?? false, netAmount: c.netAmount ?? null, grossAmount: c.grossAmount ?? null, detail: c.detail })),
     reserves: d.reserves ? `${d.reserves.symbol} ${d.reserves.backedPct}% backed (${d.reserves.custodian})` : null,
     /* A private company has no exchange behind it. The model must not describe
-     * the mark as a stock price, quote a session, or call a T-Token a share. */
+     * the mark as a stock price, quote a session, or call the token a share. */
     privateCompany: co.private
       ? {
           note: "Not listed on any exchange. The reference is the issuer's mark on the exposure behind the token, not a market price, and there is no trading session — the Solana market runs continuously.",

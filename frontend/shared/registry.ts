@@ -370,8 +370,8 @@ export const COMPANIES: Company[] = XSTOCKS_CATALOG.filter(
 
 export const COMPANY_BY_ID = Object.fromEntries(COMPANIES.map((co) => [co.id, co])) as Record<string, Company>;
 /* Primary wrappers first, then secondary ones — a company's own tokenSymbol
- * always wins, so "SPCXx" and "tSpaceX" both resolve to SpaceX without a
- * secondary wrapper ever shadowing another company's primary token. */
+ * always wins, so a secondary wrapper can never shadow another company's
+ * primary token. */
 export const COMPANY_BY_TOKEN = (() => {
   const m: Record<string, Company> = {};
   for (const co of COMPANIES) for (const w of co.wrappers ?? []) m[w.tokenSymbol.toUpperCase()] = co;

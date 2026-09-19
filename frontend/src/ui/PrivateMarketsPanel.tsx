@@ -143,7 +143,7 @@ export function PrivateMarketsPanel() {
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: `1px solid ${C.line}` }}>
             <div className="hint" style={{ lineHeight: 1.5 }}>{data.disclosure}</div>
             <div className="row" style={{ marginTop: 8, gap: 10 }}>
-              <a className="hint" href={data.disclosureUrl} target="_blank" rel="noreferrer" style={{ color: C.frost }}>How T-Tokens work ↗</a>
+              <a className="hint" href={data.disclosureUrl} target="_blank" rel="noreferrer" style={{ color: C.frost }}>How PreStocks work ↗</a>
               <a className="hint" href={data.termsUrl} target="_blank" rel="noreferrer" style={{ color: C.frost }}>Terms ↗</a>
               <span className="hint">excluded: {data.restrictedJurisdictions.join(", ")}</span>
             </div>
