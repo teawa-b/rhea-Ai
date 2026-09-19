@@ -2,7 +2,8 @@
 
 > Explore the market. Ask anything. Act onchain.
 
-Rhea is a WebXR market interface for **tokenized stocks on Solana**. Instead of rows in a brokerage
+Rhea is a WebXR market interface for **tokenized stocks on Solana** — listed companies through xStocks,
+and pre-IPO companies (OpenAI, SpaceX, Kalshi) through **Tessera** T-Tokens. Instead of rows in a brokerage
 dashboard, the market is a holographic globe. You talk to Rhea — a full-duplex voice agent built on
 **OpenAI GPT-Live-1** — and instead of a wall of text, *the AI takes you there*: it rotates the globe,
 illuminates a country, drops you at a company's headquarters, opens the live chart, pins the news that
@@ -22,7 +23,10 @@ Built for the [Stocklana hackathon](https://hackathons.solana.com/hackathons/sto
 
 | Layer | Source | Notes |
 | --- | --- | --- |
-| Tokenized stocks | **Jupiter Tokens API v2** (`xstocks` / `stocks` tags) | 66 xStocks across 7 countries at time of writing — counts are live, never hardcoded |
+| Tokenized stocks | **Jupiter Tokens API v2** (`xstocks` / `stocks` tags) | xStocks across 7 countries — counts are live, never hardcoded |
+| Pre-IPO companies | **Tessera** public API (`token-details`) | OpenAI, SpaceX and Kalshi as T-Tokens: issuer mark, mark valuation, holders |
+| Pre-IPO reserves | **Chainlink** Proof of Reserve (SmartData) | linked per token, never mirrored — the attestation refreshes ~monthly |
+| Curve design | **Meteora Dynamic Bonding Curve SDK** | reference-anchored launch curves for tokenized equities; read-only, never launches |
 | Onchain token price | **Jupiter Price API v3** | `usdPrice`, 24h change, liquidity |
 | Underlying equity price | **Pyth Pro** (with key) → Jupiter `stockData` → Yahoo (fallback) | source + timestamp always shown; stale data is flagged |
 | Market session | **Pyth** symbol schedules (keyless) | open / pre / post / closed |
@@ -31,7 +35,7 @@ Built for the [Stocklana hackathon](https://hackathons.solana.com/hackathons/sto
 | Swap execution | **Jupiter Swap V2** (with key) / Ultra (keyless) | live quote → you sign with Privy → Jupiter lands it |
 | Conditional orders | **Jupiter Trigger V2** (needs `JUPITER_API_KEY`) | buy-below / sell-above; without a key the rule is recorded locally and clearly marked *simulated* |
 | Auth + wallet | **Privy** (Google / email / existing wallet) | embedded Solana wallet created on login; private keys never touch the app or the AI |
-| Voice + reasoning | **GPT-Live-1** (voice) delegating to **GPT-5.6 Terra** (tools + web search) | 25 function tools move the world; the model cites sources it found |
+| Voice + reasoning | **GPT-Live-1** (voice) delegating to **GPT-5.6 Terra** (tools + web search) | 32 function tools move the world; the model cites sources it found |
 | Portfolio | Solana RPC (`getParsedTokenAccountsByOwner`, SPL + Token-2022) | positions, USDC, SOL, country exposure |
 | Trade checks | liquidity floor ($25k onchain) + order minimums | enforced server-side before every quote and order; the AI cannot bypass them |
 
@@ -112,7 +116,10 @@ Quest / Browser
 Express API (backend/, Railway)         secrets live here only
   ├── POST /api/live/session             GPT-Live session w/ Responses delegation + tools + web_search
   ├── GET  /api/market/overview          countries + assets (Jupiter)
-  ├── GET  /api/market/company/:id       prices (Pyth/Jupiter), corporate actions, capability
+  ├── GET  /api/market/company/:id       prices (Pyth/Jupiter/issuer mark), corporate actions, every wrapper
+  ├── GET  /api/market/private           pre-IPO: issuer marks, premium to mark, implied valuation
+  ├── POST /api/market/dbc/plan          Meteora DBC curve anchored on a company's reference price
+  ├── GET  /api/market/dbc/pool/:address live DBC pool state (read-only)
   ├── GET  /api/market/history/:id       OHLC (Pyth Pro → Yahoo)
   ├── GET  /api/market/portfolio/:wallet Solana RPC
   ├── POST /api/market/eligibility|quote|execute   compliance → Jupiter quote → execute
@@ -122,6 +129,63 @@ Express API (backend/, Railway)         secrets live here only
 Key files: `backend/shared/tools.ts` (the AI tool system), `backend/src/prompts.ts` (live + backend prompts),
 `frontend/src/ai/liveClient.ts` (GPT-Live WebRTC client), `frontend/src/ai/toolRunner.ts` (tool execution),
 `frontend/src/scene/*` (globe), `frontend/src/state/world.ts` (what the world shows), `frontend/src/solana/trade.ts` (trade + trigger flows).
+
+## Private markets (pre-IPO)
+
+Rhea prices three companies that are not listed anywhere — **OpenAI**, **SpaceX** and **Kalshi** —
+through [Tessera](https://app.tessera.pe)'s T-Tokens on Solana. They sit on the globe at their real
+headquarters alongside the listed companies, and the **Pre-IPO** chip in the top bar opens the panel.
+
+A private company breaks most of the assumptions an equity interface makes, so it is handled differently
+rather than squeezed into the same shape:
+
+- **There is no stock price.** The reference is Tessera's *mark* on the portfolio behind the token. Rhea
+  labels it as the issuer's mark and never calls it a market price.
+- **There is no session.** The panel says *private · trades 24/7* instead of quoting US market hours.
+- **The number that matters is the gap.** `premiumToMarkPct` is the onchain price against the issuer's
+  own per-token mark, and it is currently wide — the three tokens have traded anywhere from +8% to +32%
+  above mark. Scaling the issuer's mark valuation by that premium gives the **implied valuation**: what
+  the market says the whole company is worth.
+- **Jupiter's `stockData` is deliberately ignored for these.** For Tessera mints it reports the company
+  on a different notional basis than the token — on 19 Sep 2026, $762.36 against the issuer's $423.00
+  for T-SpaceX — so dividing by it would invent a 25–50% "discount" that does not exist.
+- **A T-Token is not a share.** It is a loan participation right against a Tessera issuer entity: no
+  ownership, no voting, no dividends, no place on the cap table. The disclosure and the excluded
+  jurisdictions (US, CN) are stated in the panel and before any trade.
+- **SpaceX is wrapped twice**, by Backed (SPCXx) and Tessera (tSpaceX). Both are priced independently and
+  shown side by side, with a note that they are different instruments — not two quotes for one thing.
+
+Reserve attestations are Chainlink Proof of Reserve feeds, linked out rather than cached: the auditor
+attestation behind them refreshes about monthly, so a stored copy would quietly go stale.
+
+## Curve studio (Meteora DBC)
+
+Meteora's Dynamic Bonding Curve is usually pointed at memecoins: start near zero, run a long way up,
+discover a price. A tokenized stock is the opposite problem — Pyth publishes the underlying and a private
+issuer publishes a mark — so that curve is not price discovery, it just hands the launch gap to whoever
+buys first.
+
+**Curve studio** (*Design a curve* on any company panel) builds the curve that case wants instead, in
+three segments anchored on the live reference price:
+
+```
+start ──(discovery)──> band low ══(anchor)══> band high ──(premium)──> migration
+```
+
+Thin liquidity closes the launch discount quickly, a thick anchor band puts most of the raise next to
+fair value, and a thin premium segment above it still lets real demand revalue the token. It graduates
+into DAMM v2 near the reference, so the migrated pool opens at fair value rather than wherever a spike
+ended. Fees decay exponentially from a high open, and the dynamic fee makes trading dearer exactly when
+price is being pushed off the anchor.
+
+Three presets differ in band width, anchor weight and fee decay: **blue chip**, **thinly traded** and
+**pre-IPO** (a mark that moves in steps, not ticks, needs a wider band). A curve can also be quoted in
+another tokenized stock, which makes the pool a relative-value market between two equities.
+
+Segment amounts come from the SDK's own fixed-point helpers and every config is run through
+`validateConfigParameters` before it is shown, so what you copy is a config the program accepts. It is
+read-only throughout: Rhea plans and explains curves and reads live pool state, and never signs, sends
+or funds anything. Launching stays a human action with real money.
 
 ## Trust principles (spec §26) — how they are enforced
 

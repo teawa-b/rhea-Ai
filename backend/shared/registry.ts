@@ -152,11 +152,17 @@ const CURATED: Company[] = [
     { name: "Livingston, New Jersey", lat: 40.7959, lng: -74.3149 }),
   c("applovin", "AppLovin", "APP", "US", "Ad-tech", "APPx",
     { name: "Palo Alto, California", lat: 37.4419, lng: -122.1430 }),
-  /* Two issuers wrap SpaceX: Backed's SPCXx (primary) and Tessera's tSpaceX.
-   * Both are listed so the company panel can price them side by side. */
-  c("spacex", "SpaceX", "SPCX", "US", "Aerospace (private)", "SPCXx",
+  /* Two issuers wrap SpaceX: Backed's SPCXx (primary) and Tessera's tSpaceX,
+   * priced side by side in the company panel.
+   *
+   * Not flagged `private` even though the company is: SPCX is quoted, so the
+   * primary wrapper has a real equity reference and a real 4pm close, and
+   * suppressing them would throw away accurate data. The T-Token is still
+   * priced against Tessera's mark, because that branch keys off the asset's
+   * issuer rather than the company. */
+  c("spacex", "SpaceX", "SPCX", "US", "Aerospace", "SPCXx",
     { name: "Starbase, Texas", lat: 25.9972, lng: -97.1560 },
-    { private: true, wrappers: [{ issuerKey: "tessera", tokenSymbol: "tSpaceX", mint: TESSERA_MINTS.tSpaceX }] }),
+    { wrappers: [{ issuerKey: "tessera", tokenSymbol: "tSpaceX", mint: TESSERA_MINTS.tSpaceX }] }),
   c("sp500", "S&P 500 ETF", "SPY", "US", "Index Fund", "SPYx", undefined),
   c("nasdaq100", "Nasdaq-100 ETF", "QQQ", "US", "Index Fund", "QQQx", undefined),
   c("gold", "Gold Trust", "GLD", "US", "Commodity Fund", "GLDx", undefined),
@@ -300,9 +306,12 @@ const CURATED: Company[] = [
  * markets are live — always comes from the live issuer API at runtime
  * (backend/src/tessera.ts); nothing here is a price.
  */
-/* A private company has no ticker, so `ticker` carries the name a person would
- * actually say. There is no pythSymbol and no yahooSymbol by design: querying an
- * equity feed for an unlisted company returns someone else's stock. */
+/* `private` marks a company with no quoted instrument anywhere, which is what
+ * switches off the equity machinery: no session, no close to gap against, and
+ * no Pyth or Yahoo lookup — querying an equity feed for an unlisted company
+ * returns someone else's stock. Verified per company: OPENAI and KALSHI resolve
+ * to nothing on Yahoo, while SpaceX's SPCX is quoted and so is not flagged.
+ * `ticker` carries the name a person would actually say. */
 const PRIVATE_COMPANIES: Company[] = [
   c("openai", "OpenAI", "OPENAI", "US", "Artificial Intelligence", "tOpenAI",
     { name: "Mission Bay, San Francisco", lat: 37.7679, lng: -122.3915 },
