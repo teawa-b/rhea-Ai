@@ -7,7 +7,7 @@ import { api } from "@/market/api";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { isGated, prepareTrade, prepareTrigger, describeRule } from "@/solana/trade";
-import { fmtAge, fmtPct, fmtUsd, sessionLabel } from "@/theme";
+import { fmtAge, fmtPct, fmtUsd, fmtValuation, sessionLabel } from "@/theme";
 import type { CorporateAction } from "@shared/types";
 import { Chart } from "./Chart";
 import { CloseIcon } from "./icons";
@@ -78,6 +78,15 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const inSession = p?.sessionLabel ? p.sessionLabel === "US regular session" : p?.marketSession === "regular";
   const gap = !inSession && p?.gapVsClosePct != null && Number.isFinite(p.gapVsClosePct) ? p.gapVsClosePct : null;
   const reserves = detail?.reserves ?? null;
+  /* A private company has no exchange behind it: the reference is the issuer's
+   * mark, there is no session and no 4pm close to gap against. */
+  const isPrivate = Boolean(co?.private) || p?.underlyingSource === "tessera-mark";
+  const premium = p?.premiumToMarkPct ?? null;
+  /* Every tokenized wrapper of this company. More than one means two issuers
+   * wrap the same exposure and their prices are worth comparing directly. */
+  const wrappers = detail?.wrappers ?? [];
+  const multiWrapped = wrappers.length > 1;
+  const showDbcStudio = useWorld((s) => s.showDbcStudio);
   /* Upcoming first, then newest. */
   const actions = [...(detail?.corporateActions ?? [])].sort((a, b) => Number(!!b.upcoming) - Number(!!a.upcoming) || Date.parse(b.effectiveAt) - Date.parse(a.effectiveAt));
   /* Signed-out users may still press Buy: prepareTrade opens the sign-in panel. */
@@ -123,7 +132,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         {/* Prices */}
         <div className="row" style={{ alignItems: "baseline", gap: 14 }}>
           <div>
-            <div className="hint">UNDERLYING · {p?.underlyingSource === "pyth" ? "Pyth Pro" : p?.underlyingSource === "jupiter-stockdata" ? "Jupiter · xStocks ref" : p?.underlyingSource === "yahoo" ? "Yahoo (fallback)" : "—"}</div>
+            <div className="hint">{p?.underlyingSource === "tessera-mark" ? "ISSUER MARK · Tessera" : `UNDERLYING · ${p?.underlyingSource === "pyth" ? "Pyth Pro" : p?.underlyingSource === "jupiter-stockdata" ? "Jupiter · xStocks ref" : p?.underlyingSource === "yahoo" ? "Yahoo (fallback)" : "—"}`}</div>
             <div className="big">{fmtUsd(p?.underlyingPriceUsd)}</div>
           </div>
           <div>
@@ -132,10 +141,16 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           </div>
         </div>
         <div className="row" style={{ marginTop: 6 }}>
-          <span className={`tag ${inSession ? "green" : "dim"}`}>{p ? session ?? p.marketSession.replace("_", " ") : "…"}</span>
+          {isPrivate
+            ? <span className="tag dim" style={CASE} title="A private company has no exchange session; the Solana market runs continuously.">private · trades 24/7</span>
+            : <span className={`tag ${inSession ? "green" : "dim"}`}>{p ? session ?? p.marketSession.replace("_", " ") : "…"}</span>}
           {p?.halted ? <span className="tag magenta" title="The issuer has halted this xStock">issuer halt</span> : null}
           {p?.stale ? <span className="tag amber">stale data</span> : null}
-          {gap != null ? (
+          {isPrivate && premium != null ? (
+            <span className={`tag ${premium >= 0 ? "green" : "magenta"}`} style={CASE} title={`Onchain ${fmtUsd(p?.tokenPriceUsd)} against the issuer's mark of ${fmtUsd(p?.markPriceUsd)} per token`}>
+              Token {premium >= 0 ? "+" : ""}{premium.toFixed(2)}% vs mark
+            </span>
+          ) : gap != null ? (
             <span className={`tag ${gap >= 0 ? "green" : "magenta"}`} style={CASE} title={p?.lastCloseUsd != null ? `Solana token ${fmtUsd(p.tokenPriceUsd)} vs ${fmtUsd(p.lastCloseUsd)} at the US 4pm ET close` : undefined}>
               Token {gap >= 0 ? "+" : ""}{gap.toFixed(2)}% vs 4pm close
             </span>
@@ -145,8 +160,36 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
               Backed {reserves.backedPct.toFixed(2)}% · {reserves.custodian}
             </span>
           ) : null}
-          <span className="hint">token {fmtAge(p?.tokenUpdatedAt)} · stock {fmtAge(p?.underlyingUpdatedAt)}</span>
+          <span className="hint">token {fmtAge(p?.tokenUpdatedAt)} · {isPrivate ? "mark" : "stock"} {fmtAge(p?.underlyingUpdatedAt)}</span>
         </div>
+
+        {isPrivate && p?.impliedValuationUsd ? (
+          <div className="hint" style={{ marginTop: 4 }}>
+            At this price the market values {co.name} at {fmtValuation(p.impliedValuationUsd)}.
+          </div>
+        ) : null}
+
+        {multiWrapped ? (
+          <div style={{ marginTop: 12 }}>
+            <div className="hint">TOKENIZED BY {wrappers.length} ISSUERS</div>
+            {wrappers.map((w) => {
+              const prem = w.price.premiumToMarkPct;
+              return (
+                <div key={w.asset.id} className="row" style={{ gap: 8, alignItems: "baseline", padding: "4px 0", flexWrap: "nowrap" }}>
+                  <span className="mono" style={{ width: 74, flex: "0 0 auto", fontSize: 12 }}>{w.asset.symbol}</span>
+                  <span className="hint" style={{ flex: 1, minWidth: 0 }}>{w.asset.issuer}</span>
+                  <span className="mono" style={{ fontSize: 13 }}>{fmtUsd(w.price.tokenPriceUsd)}</span>
+                  {prem != null ? <span className={`tag ${prem >= 0 ? "green" : "magenta"}`} style={CASE}>{prem >= 0 ? "+" : ""}{prem.toFixed(1)}%</span> : null}
+                  {!w.asset.tradable ? <span className="tag amber">thin</span> : null}
+                </div>
+              );
+            })}
+            <div className="hint" style={{ marginTop: 4, lineHeight: 1.45 }}>
+              Different issuers, different backing and different legal claims — the prices are not
+              interchangeable quotes for the same instrument.
+            </div>
+          </div>
+        ) : null}
 
         <div className="divider" />
         <Chart companyId={co.id} ticker={co.ticker} />
@@ -207,6 +250,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           <span className="hint">USDC</span>
           <button className="btn sol sm" disabled={!canTrade || busy != null} onClick={doBuy}>{busy === "buy" ? "Quoting…" : `Buy ${co.tokenSymbol}`}</button>
           <button className="btn danger sm" disabled={!canTrade || !pos || busy != null} onClick={doSell}>Sell all</button>
+          <button className="btn ghost sm" onClick={() => showDbcStudio(co.id)} title={`Design a Meteora bonding curve anchored on ${co.name}'s reference price`}>Design a curve</button>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
           <span className="hint">Buy</span>

@@ -48,6 +48,15 @@ export const fmtAge = (iso: string | null | undefined) => {
   return `${Math.round(s / 86400)}d ago`;
 };
 
+/** Company-sized USD: private markets are discussed in billions and trillions. */
+export const fmtValuation = (n: number | null | undefined) => {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
+  return fmtUsd(n);
+};
+
 /** Fee-sized USD: cents above a cent, otherwise tenths of a cent ("$0.001"), "<$0.001" below that. */
 export const fmtFeeUsd = (n: number | null | undefined) =>
   n == null || !Number.isFinite(n) ? "—" : n === 0 ? "$0" : n >= 0.01 ? `$${n.toFixed(2)}` : n >= 0.001 ? `$${n.toFixed(3)}` : "<$0.001";

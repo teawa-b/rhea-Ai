@@ -55,12 +55,22 @@ type WorldState = {
   panelReady: boolean;
   /** True while the camera is away at the holdings planet (USDC, SOL, stock moons). */
   vault: boolean;
+  /** The pre-IPO panel: private companies, their issuer marks and the premium
+   *  the onchain market is paying over them. */
+  privateMarkets: boolean;
+  /** The Meteora DBC studio. Holds the company its curve is anchored on, or ""
+   *  for an unanchored curve; null when closed. */
+  dbcStudio: string | null;
   /** Bumps whenever something the AI should know about changes (for UI context). */
   contextVersion: number;
 
   revealPanel: () => void;
   /** Fly to the holdings planet; any focus / reset brings the camera back to Earth. */
   showHoldings: () => void;
+  /** Open (or close) the pre-IPO panel. */
+  showPrivateMarkets: (on?: boolean) => void;
+  /** Open the DBC studio, optionally anchored on a company; null closes it. */
+  showDbcStudio: (companyId?: string | null) => void;
   focusRegion: (q: string) => string | null;
   focusCountry: (q: string) => CountryCode | null;
   focusCompany: (q: string) => string | null;
@@ -129,13 +139,33 @@ export const useWorld = create<WorldState>((set, get) => ({
   streetViewCompany: null,
   panelReady: true,
   vault: false,
+  privateMarkets: false,
+  dbcStudio: null,
   contextVersion: 0,
 
   revealPanel: () => { clearTimeout(revealTimer); set({ panelReady: true }); },
   showHoldings: () => {
     clearTimeout(revealTimer);
     /* Leave any focused place so Earth is back at the world view on return. */
-    set((s) => ({ vault: true, view: "world", focusedRegion: null, focusedCountry: null, focusedCompany: null, comparison: null, streetViewCompany: null, panelReady: true, contextVersion: s.contextVersion + 1 }));
+    set((s) => ({ vault: true, view: "world", focusedRegion: null, focusedCountry: null, focusedCompany: null, comparison: null, streetViewCompany: null, privateMarkets: false, dbcStudio: null, panelReady: true, contextVersion: s.contextVersion + 1 }));
+  },
+
+  showPrivateMarkets: (on = true) => {
+    clearTimeout(revealTimer);
+    set((s) => ({
+      privateMarkets: on,
+      ...(on ? { vault: false, comparison: null, dbcStudio: null, panelReady: true } : {}),
+      contextVersion: s.contextVersion + 1,
+    }));
+  },
+
+  showDbcStudio: (companyId = "") => {
+    clearTimeout(revealTimer);
+    set((s) => ({
+      dbcStudio: companyId,
+      ...(companyId != null ? { vault: false, comparison: null, privateMarkets: false, panelReady: true } : {}),
+      contextVersion: s.contextVersion + 1,
+    }));
   },
 
   focusRegion: (q) => {
@@ -203,6 +233,8 @@ export const useWorld = create<WorldState>((set, get) => ({
       focusedCompany: null,
       comparison: null,
       streetViewCompany: null,
+      privateMarkets: false,
+      dbcStudio: null,
       panelReady: true,
       ...(clear ? { highlightedCountries: [], highlightedCompanies: [], connections: [], countryHeat: {}, news: null, impact: null, chartEvents: [] } : {}),
       contextVersion: s.contextVersion + 1,

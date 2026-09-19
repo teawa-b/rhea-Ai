@@ -9,6 +9,8 @@ import { DEMO_WALLET, sessionPill, startSessionPolling, useMarket } from "@/stat
 import { useWorld } from "@/state/world";
 import { fmtEt, fmtPct, fmtUsd, solscanTx } from "@/theme";
 import { CompanyPanel } from "./CompanyPanel";
+import { DbcStudioPanel } from "./DbcStudioPanel";
+import { PrivateMarketsPanel } from "./PrivateMarketsPanel";
 import { CoLogo } from "./CoLogo";
 import { CountryPanel } from "./CountryPanel";
 import { ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon } from "./icons";
@@ -123,6 +125,10 @@ export function Hud() {
   /* The portfolio panel rides along with the holdings planet. */
   const showPortfolio = useWorld((s) => s.vault);
   const showHoldings = useWorld((s) => s.showHoldings);
+  const privateMarkets = useWorld((s) => s.privateMarkets);
+  const showPrivateMarkets = useWorld((s) => s.showPrivateMarkets);
+  const dbcStudio = useWorld((s) => s.dbcStudio);
+  const showDbcStudio = useWorld((s) => s.showDbcStudio);
 
   const voiceState = useVoice((s) => s.state);
   const inputMode = useVoice((s) => s.inputMode);
@@ -191,7 +197,7 @@ export function Hud() {
   /* A focused place's panel waits until the camera has arrived (panelReady). */
   const placePanel = panelReady && (focusedCompany || focusedCountry || focusedRegion);
   const gatePanel = !pendingTrade && !pendingOrder && (depositPrompt || loginPrompt);
-  const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
+  const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || privateMarkets || dbcStudio != null || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
   const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
 
@@ -214,6 +220,13 @@ export function Hud() {
             ) : "loading market…"}
           </span>
           {status && !status.openai ? <span className="chip dim" title="Set OPENAI_API_KEY on the server"><i className="dot err" />voice offline</span> : null}
+          <button
+            className={`chip clickable${privateMarkets ? " sol" : ""}`}
+            onClick={() => (privateMarkets ? showPrivateMarkets(false) : showPrivateMarkets(true))}
+            title="Pre-IPO companies: what the issuer marks them at, and what the onchain market pays"
+          >
+            Pre-IPO
+          </button>
           {auth.authenticated ? (
             <>
               <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings())} title={showPortfolio ? "Back to Earth" : "Fly to your holdings"}>
@@ -303,10 +316,12 @@ export function Hud() {
                 </div>
               </div>
             ) : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && focusedRegion ? <RegionPanel key={focusedRegion} id={focusedRegion} /> : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !focusedCompany && !focusedCountry && !focusedRegion && (news || impact || heatEntries.length) ? (
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && privateMarkets ? <PrivateMarketsPanel /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !privateMarkets && dbcStudio != null ? <DbcStudioPanel companyId={dbcStudio} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && panelReady && focusedRegion ? <RegionPanel key={focusedRegion} id={focusedRegion} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && !focusedCompany && !focusedCountry && !focusedRegion && (news || impact || heatEntries.length) ? (
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>{heatEntries.length ? "Portfolio geography" : news?.target ?? "Research"}</h2><div className="sub">{heatEntries.length ? "exposure by country" : "sources"}</div></div><button className="btn ghost sm" onClick={() => resetGlobe(true)}>✕</button></div>
                 <div className="panel-body scroll">
