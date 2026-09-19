@@ -197,6 +197,12 @@ export function Hud() {
   /* A focused place's panel waits until the camera has arrived (panelReady). */
   const placePanel = panelReady && (focusedCompany || focusedCountry || focusedRegion);
   const gatePanel = !pendingTrade && !pendingOrder && (depositPrompt || loginPrompt);
+  /* Counted apart on purpose. A T-Token is a loan participation right against an
+   * issuer entity, not a share, so it does not belong in a "tokenized stocks"
+   * total — the same distinction the panels and the voice prompt hold to. */
+  const listedCount = overview?.assets.filter((a) => a.issuerKey !== "tessera").length ?? 0;
+  const preIpoCount = overview?.assets.filter((a) => a.issuerKey === "tessera").length ?? 0;
+
   const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || privateMarkets || dbcStudio != null || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
   const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
@@ -214,8 +220,8 @@ export function Hud() {
             <SolanaMark />
             {overview ? (
               <>
-                <span className="long">{overview.assets.length} tokenized stocks · {overview.countries.length} countries · Solana</span>
-                <span className="short">{overview.assets.length} stocks · {overview.countries.length} countries</span>
+                <span className="long">{listedCount} tokenized stocks{preIpoCount ? ` · ${preIpoCount} pre-IPO` : ""} · {overview.countries.length} countries · Solana</span>
+                <span className="short">{listedCount} stocks{preIpoCount ? ` · ${preIpoCount} pre-IPO` : ""} · {overview.countries.length} countries</span>
               </>
             ) : "loading market…"}
           </span>
