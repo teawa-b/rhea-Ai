@@ -224,35 +224,58 @@ function CompanyHolo({ companyId }: { companyId: string }) {
   const W = 1.04, H = 0.5;
   const triggerPrice = p?.tokenPriceUsd ? Math.round(p.tokenPriceUsd * 0.9) : 0;
 
+  /* A private company has no exchange series, so there is nothing to plot. The
+   * plane used to mount anyway and left a hole in the middle of the cluster,
+   * with range pills under it that changed nothing. Skip both and lift
+   * everything below the chart into the space it would have taken. */
+  const isPrivate = Boolean(co.private) || p?.underlyingSource === "issuer-mark";
+  const lift = isPrivate ? 0.42 : 0;
+  const premium = p?.premiumToMarkPct ?? null;
+
   return (
     <group>
-      {/* Header above the chart */}
+      {/* Header. The onchain price leads, as it does in the DOM panel: it is
+          what a buy actually costs. The reference sits under it. */}
       <Label position={[-W / 2, 0.42, 0]} text={co.name.toUpperCase()} size={0.056} color="#ffffff" />
-      <Label position={[-W / 2, 0.36, 0]} text={`${co.ticker} · ${co.tokenSymbol} · ${co.sector} · ${COUNTRIES[co.countryCode].name}`} size={0.022} color="#b8c7da" />
-      <Label position={[W / 2, 0.42, 0]} text={fmtUsd(p?.underlyingPriceUsd)} size={0.062} color="#ffffff" anchorX="right" mono />
-      <Label position={[W / 2, 0.36, 0]} text={`token ${fmtUsd(p?.tokenPriceUsd)}  ${fmtPct(ch)}`} size={0.024} color={ch == null ? "#b8c7da" : ch >= 0 ? C.solGreen : C.magenta} anchorX="right" mono />
+      <Label position={[-W / 2, 0.36, 0]} text={`${co.ticker} · ${co.sector}`} size={0.022} color="#b8c7da" />
+      <Label position={[W / 2, 0.42, 0]} text={fmtUsd(p?.tokenPriceUsd)} size={0.062} color="#ffffff" anchorX="right" mono />
+      <Label
+        position={[W / 2, 0.36, 0]}
+        text={isPrivate
+          ? `mark ${fmtUsd(p?.markPriceUsd)}${premium != null ? `  ${premium >= 0 ? "+" : ""}${premium.toFixed(1)}% vs mark` : ""}`
+          : `underlying ${fmtUsd(p?.underlyingPriceUsd)}  ${fmtPct(ch)}`}
+        size={0.024}
+        color={isPrivate ? (premium == null ? "#b8c7da" : premium >= 0 ? C.solGreen : C.magenta) : ch == null ? "#b8c7da" : ch >= 0 ? C.solGreen : C.magenta}
+        anchorX="right"
+        mono
+      />
 
-      {/* The chart itself — transparent, no backdrop */}
-      <group position={[0, 0.06, 0]}><ChartPlane companyId={companyId} w={W} h={H} /></group>
+      {/* The chart itself — transparent, no backdrop. Listed companies only. */}
+      {isPrivate ? (
+        <Label position={[-W / 2, 0.28, 0]} text={`Private company · trades 24/7 · no exchange price history`} size={0.022} color="#8ea3bd" maxWidth={W} />
+      ) : (
+        <group position={[0, 0.06, 0]}><ChartPlane companyId={companyId} w={W} h={H} /></group>
+      )}
 
       {/* Stats line under the chart */}
-      <Label position={[-W / 2, -0.23, 0]} text={pos ? `Position ${pos.amountUi.toFixed(4)} ${pos.symbol} · ${fmtUsd(pos.valueUsd)}` : auth.authenticated ? "No position" : "Not signed in · Buy opens sign-in"} size={0.022} color="#dfe9f5" />
-      {active[0] ? <Label position={[-W / 2, -0.265, 0]} icon="order" text={`LIMIT ORDER · JUPITER · ${describeRule(active[0])}`} size={0.021} color={C.gold} /> : null}
+      <Label position={[-W / 2, -0.23 + lift, 0]} text={pos ? `Position ${pos.amountUi.toFixed(4)} ${pos.symbol} · ${fmtUsd(pos.valueUsd)}` : auth.authenticated ? "No position" : "Not signed in · Buy opens sign-in"} size={0.022} color="#dfe9f5" />
+      {active[0] ? <Label position={[-W / 2, -0.265 + lift, 0]} icon="order" text={`LIMIT ORDER · JUPITER · ${describeRule(active[0])}`} size={0.021} color={C.gold} /> : null}
       {impact && impact.companyId === companyId ? (
-        <Label position={[-W / 2, -0.302, 0]} text={clip(`${impact.impact.replace("_", " ").toUpperCase()} · ${(impact.confidence * 100).toFixed(0)}% · ${impact.event}`, 84)} size={0.021} color={impact.impact === "potentially_negative" ? C.magenta : impact.impact === "potentially_positive" ? C.solGreen : C.amber} maxWidth={W} />
+        <Label position={[-W / 2, -0.302 + lift, 0]} text={clip(`${impact.impact.replace("_", " ").toUpperCase()} · ${(impact.confidence * 100).toFixed(0)}% · ${impact.event}`, 84)} size={0.021} color={impact.impact === "potentially_negative" ? C.magenta : impact.impact === "potentially_positive" ? C.solGreen : C.amber} maxWidth={W} />
       ) : null}
-      {items.map((n, i) => <Label key={n.id} position={[-W / 2, -0.34 - i * 0.034, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 80)} size={0.021} color="#c7d7ea" maxWidth={W} />)}
+      {items.map((n, i) => <Label key={n.id} position={[-W / 2, -0.34 + lift - i * 0.034, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 80)} size={0.021} color="#c7d7ea" maxWidth={W} />)}
 
       {/* Assistant buttons floating beneath */}
-      <group position={[0, -0.46, 0.01]}>
+      <group position={[0, -0.46 + lift, 0.01]}>
         <Pill position={[-0.36, 0, 0]} w={0.2} icon={holding ? "dot" : undefined} label={holding ? "Listening" : voiceState === "connecting" ? "Connecting" : "Hold · Talk"} accent={holding ? C.violet : C.sol} active={holding} onHoldStart={() => setHold(true, auth)} onHoldEnd={() => setHold(false)} />
         <Pill position={[-0.135, 0, 0]} w={0.2} label="Buy $100" accent={C.solGreen} disabled={!canTrade} onClick={() => void prepareTrade(auth, companyId, "buy", 100).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
         <Pill position={[0.09, 0, 0]} w={0.2} label="Sell all" accent={C.magenta} disabled={!canTrade || !pos} onClick={() => pos && void prepareTrade(auth, companyId, "sell", pos.amountUi).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
         <Pill position={[0.315, 0, 0]} w={0.2} label={triggerPrice ? `Buy < $${triggerPrice}` : "Trigger"} accent={C.amber} disabled={!canTrade || !triggerPrice} onClick={() => void prepareTrigger(auth, companyId, "buy_below", triggerPrice, 100).then((r) => { if (!r.ok) setError(r.error); })} />
       </group>
-      <group position={[0, -0.545, 0.01]}>
-        {RANGES.map((r, i) => <Pill key={r} position={[-0.33 + i * 0.13, 0, 0]} w={0.11} label={r} accent={C.frost} active={r === range} onClick={() => setChartRange(r)} />)}
-        <Pill position={[0.27, 0, 0]} w={0.18} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
+      <group position={[0, -0.545 + lift, 0.01]}>
+        {/* Range pills only where a range means something. */}
+        {isPrivate ? null : RANGES.map((r, i) => <Pill key={r} position={[-0.33 + i * 0.13, 0, 0]} w={0.11} label={r} accent={C.frost} active={r === range} onClick={() => setChartRange(r)} />)}
+        <Pill position={[isPrivate ? -0.36 : 0.27, 0, 0]} w={0.18} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
       </group>
     </group>
   );
