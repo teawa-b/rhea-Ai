@@ -61,7 +61,7 @@ async function companyProfile(q: string) {
           premiumToMarkPct: p.premiumToMarkPct ?? null,
           impliedValuationUsd: p.impliedValuationUsd ?? null,
           instrument: d.asset?.issuerKey === "prestocks"
-            ? "A PreStock: an issuer token backed 1:1 by SPV exposure tracking the private company's price. Economic exposure only — no ownership, voting, dividend or information rights — and not affiliated with or endorsed by the company. Not available in the US or to US persons."
+            ? "A PreStock: an issuer token backed 1:1 by SPV exposure tracking the private company's price. Economic exposure only — no ownership, voting, dividend or information rights — and not affiliated with or endorsed by the company."
             : null,
         }
       : null,
@@ -312,7 +312,6 @@ export function createToolRunner(getAuth: () => RheaAuth) {
           ok: true,
           issuer: pm.issuer,
           instrument: "PreStocks are issuer tokens backed 1:1 by SPV exposure tracking a private company's price. Economic exposure only — no ownership, voting or dividends — and not endorsed by the company.",
-          restrictedJurisdictions: pm.restrictedJurisdictions,
           companies: pm.assets.map((a) => ({
             company: a.companyName, symbol: a.symbol, sector: a.sector,
             onchainPriceUsd: a.tokenPriceUsd, issuerMarkUsd: a.markPriceUsd,
@@ -533,7 +532,11 @@ export function createToolRunner(getAuth: () => RheaAuth) {
           company: co.name,
           allowed: m.demoMode ? false : r.result.allowed,
           reasons: m.demoMode ? [DEMO_READ_ONLY, ...r.result.reasons] : r.result.reasons,
-          disclosure: r.result.disclosure, disclosureUrl: r.result.disclosureUrl,
+          /* The issuer's disclosure is shown in the panel, where the user can
+           * read it. It is deliberately not handed to the model: it ends with
+           * the issuer's jurisdiction terms, and Rhea reading those out turns
+           * a quote request into an interrogation about where someone lives —
+           * something the app neither checks nor enforces. */
           asset: r.asset ? { symbol: r.asset.symbol, tradable: r.asset.tradable } : null,
           signedIn: auth.authenticated,
         };

@@ -206,7 +206,7 @@ export const RHEA_TOOLS: ToolDef[] = [
     type: "function",
     name: "show_private_markets",
     description:
-      "Open the pre-IPO panel and return every private company Rhea can price: the issuer's mark per token, the executable onchain price, the premium or discount between them, implied and issuer valuations, holders and liquidity. Use for 'pre-IPO', 'private companies', 'OpenAI', 'Anthropic', 'SpaceX', 'Anduril', 'what's OpenAI worth', or any question about a company that is not listed on an exchange. These are issuer tokens backed 1:1 by SPV exposure, giving economic exposure only and not endorsed by the company — say so before discussing buying one.",
+      "Open the pre-IPO panel and return every private company Rhea can price: the issuer's mark per token, the executable onchain price, the premium or discount between them, implied and issuer valuations, holders and liquidity. Use for 'pre-IPO', 'private companies', 'OpenAI', 'Anthropic', 'SpaceX', 'Anduril', 'what's OpenAI worth', or any question about a company that is not listed on an exchange. These are issuer tokens backed 1:1 by SPV exposure, giving economic exposure only and not endorsed by the company.",
     parameters: obj({}),
   },
   {
