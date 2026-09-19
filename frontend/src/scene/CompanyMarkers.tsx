@@ -103,7 +103,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
   return (
     <group ref={rootRef} position={pos} quaternion={quat}>
       {/* spire: a thin luminous column with a soft additive sheath */}
-      <mesh ref={towerRef} position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id); }}>
+      <mesh ref={towerRef} position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id, "user"); }}>
         <cylinderGeometry args={[0.005, 0.009, height, 8]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
@@ -145,7 +145,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
         </group>
       ) : null}
       {/* hit target */}
-      <mesh position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id); }}>
+      <mesh position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id, "user"); }}>
         <sphereGeometry args={[0.07, 8, 6]} />
         <meshBasicMaterial visible={false} />
       </mesh>
@@ -157,7 +157,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
           subtitle={activeOrders.length ? `LIMIT ORDER · JUPITER · ${sub}` : sub}
           accent={activeOrders.length ? C.amber : accent}
           scale={labelScale}
-          onClick={() => focusCompany(co.id)}
+          onClick={() => focusCompany(co.id, "user")}
         />
       ) : null}
     </group>

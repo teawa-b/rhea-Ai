@@ -92,7 +92,7 @@ function Pin({ cs, rank }: { cs: CountrySummary; rank: number }) {
         <meshBasicMaterial color={accent} transparent opacity={0.5} side={THREE.DoubleSide} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
       </mesh>
       {/* generous invisible hit target */}
-      <mesh position={[0, 0.14, 0]} onClick={(e) => { e.stopPropagation(); focusCountry(cs.code); }}>
+      <mesh position={[0, 0.14, 0]} onClick={(e) => { e.stopPropagation(); focusCountry(cs.code, "user"); }}>
         <sphereGeometry args={[0.13, 10, 8]} />
         <meshBasicMaterial visible={false} />
       </mesh>
@@ -107,7 +107,7 @@ function Pin({ cs, rank }: { cs: CountrySummary; rank: number }) {
           accent={accent}
           scale={labelScale}
           dim={noTradable && !isFocused}
-          onClick={() => focusCountry(cs.code)}
+          onClick={() => focusCountry(cs.code, "user")}
           opacity={overview ? 1 : 0}
         />
       ) : null}
@@ -208,7 +208,7 @@ function RegionTickers({ regionId, countries }: { regionId: string; countries: C
               scale={0.46}
               dim={!isLive}
               icon={logoUrl(co.id)}
-              onClick={() => focusCompany(c.id)}
+              onClick={() => focusCompany(c.id, "user")}
             />
           </group>
         );

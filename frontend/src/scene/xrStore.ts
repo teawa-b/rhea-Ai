@@ -20,7 +20,8 @@ export const xrStore = createXRStore({
   frameBufferScaling: "high",
   foveation: 0.6,
   anchors: false,
-  hitTest: false,
+  /* Optional: phones use it to drop the globe on a real surface (see ArPlacement). */
+  hitTest: true,
   planeDetection: false,
   meshDetection: false,
   /* Phones: keep the DOM HUD on screen during the session (optional feature;

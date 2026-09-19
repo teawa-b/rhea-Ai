@@ -121,7 +121,7 @@ export function HoldingsPlanet() {
         color: C.solGreen,
         size: sizeFor(p.valueUsd ?? 0),
         icon: logoUrl(p.companyId),
-        onClick: () => focusCompany(p.companyId),
+        onClick: () => focusCompany(p.companyId, "user"),
       })),
     ];
   }, [portfolio, focusCompany]);

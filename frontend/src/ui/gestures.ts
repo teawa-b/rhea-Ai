@@ -9,18 +9,26 @@
 import { useEffect, type RefObject } from "react";
 import { DIST, rig, userNudge, userZoom } from "@/scene/rig";
 
+/** A touch that moves less than this, for less than this long, is a tap rather than a drag. */
+const TAP_PX = 12;
+const TAP_MS = 400;
+
 const INTERACTIVE = ".clickable, button, a, input, select, textarea, [role=dialog]";
 
 type P = { x: number; y: number };
 
-export function useGlobeGestures(ref: RefObject<HTMLElement | null>, opts: { dragAnywhere: boolean; enabled?: boolean }) {
-  const { dragAnywhere, enabled = true } = opts;
+export function useGlobeGestures(
+  ref: RefObject<HTMLElement | null>,
+  opts: { dragAnywhere: boolean; enabled?: boolean; /** fired when a touch on empty screen was a tap, not a drag */ onTap?: (x: number, y: number) => void },
+) {
+  const { dragAnywhere, enabled = true, onTap } = opts;
   useEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
     const pts = new Map<number, P>();
     let drag: (P & { id: number }) | null = null;
     let pinch: { d: number } | null = null;
+    let tap: { id: number; x: number; y: number; t: number; moved: number } | null = null;
 
     const interactive = (t: EventTarget | null) => t instanceof Element && Boolean(t.closest(INTERACTIVE));
     const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
@@ -29,9 +37,11 @@ export function useGlobeGestures(ref: RefObject<HTMLElement | null>, opts: { dra
       if (e.pointerType === "mouse" && e.button !== 0) return;
       if (interactive(e.target)) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 1) tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
       if (pts.size === 2) {
         pinch = { d: dist() };
         drag = null;
+        tap = null;
         rig.pinching = true;
         rig.dragging = false;
       } else if (pts.size === 1 && dragAnywhere && !rig.dragging) {
@@ -43,6 +53,7 @@ export function useGlobeGestures(ref: RefObject<HTMLElement | null>, opts: { dra
     const move = (e: PointerEvent) => {
       const p = pts.get(e.pointerId);
       if (!p) return;
+      if (tap && tap.id === e.pointerId) tap.moved += Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y);
       p.x = e.clientX; p.y = e.clientY;
       if (pinch && pts.size >= 2) {
         const d = dist();
@@ -67,6 +78,11 @@ export function useGlobeGestures(ref: RefObject<HTMLElement | null>, opts: { dra
       if (!pts.delete(e.pointerId)) return;
       if (pinch && pts.size < 2) { pinch = null; rig.pinching = false; rig.idleT = 0; }
       if (drag && drag.id === e.pointerId) { drag = null; rig.dragging = false; rig.idleT = 0; }
+      if (tap && tap.id === e.pointerId) {
+        const t = tap;
+        tap = null;
+        if (onTap && t.moved < TAP_PX && performance.now() - t.t < TAP_MS) onTap(e.clientX, e.clientY);
+      }
     };
 
     el.addEventListener("pointerdown", down);
@@ -80,6 +96,7 @@ export function useGlobeGestures(ref: RefObject<HTMLElement | null>, opts: { dra
       el.removeEventListener("pointercancel", up);
       pts.clear(); rig.pinching = false;
       if (drag) rig.dragging = false;
+      tap = null;
     };
-  }, [ref, dragAnywhere, enabled]);
+  }, [ref, dragAnywhere, enabled, onTap]);
 }

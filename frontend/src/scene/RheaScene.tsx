@@ -16,6 +16,7 @@ import { Connections } from "./Connections";
 import { CountryPins } from "./CountryPins";
 import { Globe, Stars } from "./Globe";
 import { HoldingsPlanet } from "./HoldingsPlanet";
+import { ArPlacement } from "./ArPlacement";
 import { useHandheld } from "./handheld";
 import { XRPanels } from "./XRPanels";
 import { xrStore } from "./xrStore";
@@ -111,6 +112,7 @@ export function RheaScene() {
             <HoldingsPlanet />
             <XRPanels />
           </XrHeadAnchor>
+          <ArPlacement />
         </Suspense>
       </XR>
     </Canvas>
