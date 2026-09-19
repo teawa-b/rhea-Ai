@@ -374,3 +374,25 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
 /* Company logo chips in panel lists */
 .co-logo { flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px rgba(63,224,255,0.25), 0 0 10px rgba(153,69,255,0.18); }
 .co-logo.mono-logo { display: grid; place-items: center; font-weight: 800; letter-spacing: 0.02em; color: #fff; background: linear-gradient(135deg, var(--sol), var(--cyan-deep)); }
+
+/* Collapsible panel sections. The company panel answers seven questions at
+   once; only price, chart and trade stay open, and the rest sit behind these
+   so the panel reads as an answer rather than a dump. */
+.sect {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: 0; padding: 9px 0; cursor: pointer;
+  color: var(--frost); font-family: inherit; font-size: 11px;
+  letter-spacing: 0.12em; text-transform: uppercase; text-align: left;
+}
+.sect:hover { color: var(--cyan); }
+.sect .caret {
+  margin-left: auto; font-size: 13px; line-height: 1; opacity: 0.7;
+  transition: transform 140ms ease;
+}
+.sect[aria-expanded="true"] .caret { transform: rotate(90deg); }
+.sect .count {
+  font-size: 10px; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 999px;
+  border: 1px solid rgba(143,232,255,0.35); text-transform: none;
+}
+.sect-body { padding-bottom: 4px; }
+@media (prefers-reduced-motion: reduce) { .sect .caret { transition: none; } }
