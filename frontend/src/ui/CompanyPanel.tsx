@@ -192,7 +192,17 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         ) : null}
 
         <div className="divider" />
-        <Chart companyId={co.id} ticker={co.ticker} />
+        {isPrivate ? (
+          /* No exchange lists this company, so there is no series to draw and
+           * the range buttons would be meaningless. Say why, rather than
+           * leaving a chart that can only ever show a spinner. */
+          <div className="hint" style={{ lineHeight: 1.5 }}>
+            No price history: {co.name} is private, so there is no exchange series to chart. The issuer's
+            mark and the onchain price above are the only two prices that exist.
+          </div>
+        ) : (
+          <Chart companyId={co.id} ticker={co.ticker} />
+        )}
 
         {/* Position */}
         <div className="divider" />

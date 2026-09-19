@@ -360,6 +360,18 @@ export async function history(companyId: string, range: ChartRange): Promise<Cha
   const ttl = range === "1D" ? 60_000 : 10 * 60_000;
   if (cached && Date.now() - cached.at < ttl) return cached.data;
 
+  /* No exchange lists a private company, so there is no OHLC series anywhere.
+   * Asking Yahoo for its ticker 404s, which used to surface as a 502 and left
+   * the chart spinning forever. An empty series with a reason is the honest
+   * answer, and the panel renders it as a sentence instead of a spinner. */
+  if (company.private) {
+    return {
+      companyId, range, resolution: "none", source: "none", candles: [],
+      fetchedAt: new Date().toISOString(),
+      unavailableReason: `${company.name} is private, so there is no exchange price history to chart. The issuer's mark and the onchain price are the only two prices that exist.`,
+    };
+  }
+
   const cfg = RANGE_CFG[range];
   let candles: Candle[] = [];
   let source: ChartHistory["source"] = "yahoo";

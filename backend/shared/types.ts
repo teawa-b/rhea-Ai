@@ -314,9 +314,13 @@ export type ChartHistory = {
   companyId: string;
   range: ChartRange;
   resolution: string;
-  source: "pyth" | "yahoo";
+  /** "none" when no series exists at all — a private company has no exchange
+   *  history to chart, which is a real answer rather than a failure. */
+  source: "pyth" | "yahoo" | "none";
   candles: Candle[];
   fetchedAt: string;
+  /** Set when candles are empty by design; the UI says this instead of spinning. */
+  unavailableReason?: string;
 };
 
 export type NewsEvent = {
