@@ -6,6 +6,7 @@ import { useAuth } from "@/auth/Auth";
 import { openSignInTab } from "@/auth/signinTab";
 import { useVoice } from "@/ai/voice";
 import { useMarket } from "@/state/market";
+import { leaveHandheldForDom } from "@/scene/handheld";
 import { cancelAnnouncement, cancelTrigger, confirmTrade, confirmTrigger, describeIntent, describeRule, feeSummary, orderStatusLabel, tradeConfirmedAnnouncement } from "@/solana/trade";
 import { fmtAge, fmtEt, fmtSeconds, fmtUsd, sessionLabel, shortSig, solscanTx } from "@/theme";
 
@@ -41,6 +42,8 @@ export function TradePanel() {
   const onConfirm = async () => {
     setErr(null);
     try {
+      /* Privy's signing prompt is a DOM modal a phone AR session would hide. */
+      await leaveHandheldForDom();
       const done = await confirmTrade(auth, pending);
       announce(tradeConfirmedAnnouncement(done));
     } catch (e) {
@@ -114,6 +117,7 @@ export function OrderPanel() {
   const onConfirm = async () => {
     setBusy(true); setErr(null);
     try {
+      await leaveHandheldForDom();
       if (isCancel) {
         announce(cancelAnnouncement(await cancelTrigger(auth, pending)));
         return;
@@ -196,7 +200,7 @@ export function LoginPanel() {
         </p>
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn ghost" onClick={() => setPrompt(null)}>Later</button>
-          <button className="btn primary" onClick={() => { if (auth.mode === "guest") auth.login(); else openSignInTab(auth); }} disabled={!auth.ready} title="Opens sign-in in a new tab">{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in ↗"}</button>
+          <button className="btn primary" onClick={() => { void leaveHandheldForDom().then(() => { if (auth.mode === "guest") auth.login(); else openSignInTab(auth); }); }} disabled={!auth.ready} title="Opens sign-in in a new tab">{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in ↗"}</button>
         </div>
       </div>
     </div>

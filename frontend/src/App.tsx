@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "zustand";
 import { RheaAuthProvider, useAuth } from "@/auth/Auth";
 import { useSignInTabSync } from "@/auth/signinTab";
@@ -6,11 +7,13 @@ import { setVoiceAuth, useVoice, wireContextUpdates } from "@/ai/voice";
 import { analyticsSummary, track, wireAnalytics } from "@/analytics";
 import { RheaScene, enterImmersive, xrStore } from "@/scene/RheaScene";
 import { xrGlobe } from "@/scene/CameraRig";
+import { arOverlayRoot, detectHandheld, enterHandheld, exitHandheld, useHandheld } from "@/scene/handheld";
 import { rig } from "@/scene/rig";
 import { describeIntent, resumeIntent } from "@/solana/trade";
 import { demoRequested, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
+import { useGlobeGestures } from "@/ui/gestures";
 import { Hud } from "@/ui/Hud";
 
 function Boot() {
@@ -24,9 +27,10 @@ function Boot() {
     void loadOverview();
     wireContextUpdates();
     wireAnalytics();
+    void detectHandheld();
     const h = setInterval(() => void loadOverview(), 5 * 60_000);
     /* dev handle for poking the world from the console */
-    (window as unknown as { rhea: unknown }).rhea = { world: useWorld, market: useMarket, rig, xrGlobe, voice: useVoice, analytics: analyticsSummary, enterImmersive, xrStore };
+    (window as unknown as { rhea: unknown }).rhea = { world: useWorld, market: useMarket, rig, xrGlobe, voice: useVoice, analytics: analyticsSummary, enterImmersive, xrStore, handheld: useHandheld, enterHandheld, exitHandheld };
     return () => clearInterval(h);
   }, [loadOverview, loadStatus]);
   return null;
@@ -81,25 +85,66 @@ function IntentResumer() {
   return null;
 }
 
-/* Hide the DOM HUD while an immersive session is running (XRPanels takes
- * over) and switch the mic to hold-to-speak: in a headset the user holds the
- * controller's A button (or the talk pill) to talk, so Rhea never hears room
- * noise and can be interrupted cleanly. */
+/* Headset: hide the DOM HUD while an immersive session is running (XRPanels
+ * takes over) and switch the mic to hold-to-speak, so Rhea never hears room
+ * noise and can be interrupted cleanly. Phone AR: the same HUD stays up,
+ * rendered into the WebXR DOM overlay root so the browser keeps showing it
+ * over the camera feed. */
 function HudGate() {
   const mode = useStore(xrStore, (s) => s.mode);
+  const handheld = useHandheld((s) => s.active);
+  const headset = mode != null && handheld !== "webxr";
   useEffect(() => {
-    if (mode) track("webxr_entered", mode);
-    useVoice.getState().setPushToTalk(mode != null);
-  }, [mode]);
-  return mode == null ? <Hud /> : null;
+    if (headset) track("webxr_entered", mode ?? "");
+    useVoice.getState().setPushToTalk(headset);
+  }, [headset, mode]);
+  if (headset) return null;
+  if (handheld === "webxr" && arOverlayRoot) return createPortal(<ArOverlay><Hud /></ArOverlay>, arOverlayRoot);
+  return <Hud />;
+}
+
+/* Inside the WebXR overlay the canvas isn't the element under the finger, so
+ * spin/pinch are read here; taps on buttons must not also "select" in the
+ * scene (beforexrselect), while taps on empty screen still reach the markers. */
+function ArOverlay({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useGlobeGestures(ref, { dragAnywhere: true });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const guard = (e: Event) => { if (e.target instanceof Element && e.target.closest(".clickable, button, a, input, select, textarea")) e.preventDefault(); };
+    el.addEventListener("beforexrselect", guard);
+    return () => el.removeEventListener("beforexrselect", guard);
+  }, []);
+  return <div ref={ref} className="ar-overlay-inner">{children}</div>;
+}
+
+/* Phone camera view (no WebXR): the rear camera behind the transparent canvas. */
+function CameraBackdrop() {
+  const stream = useHandheld((s) => (s.active === "camera" ? s.stream : null));
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    v.srcObject = stream;
+    if (stream) v.play().catch(() => undefined);
+    return () => { v.srcObject = null; };
+  }, [stream]);
+  if (!stream) return null;
+  return <video ref={ref} className="camera-backdrop" autoPlay playsInline muted aria-hidden />;
 }
 
 export function App() {
+  const appRef = useRef<HTMLDivElement>(null);
+  const cameraView = useHandheld((s) => s.active === "camera");
+  /* Pinch-to-zoom for every touch screen; drag-from-anywhere in the camera view (the globe is small over a busy feed). */
+  useGlobeGestures(appRef, { dragAnywhere: cameraView });
   return (
     <RheaAuthProvider>
-      <div className="app">
+      <div className={`app${cameraView ? " camera-view" : ""}`} ref={appRef}>
         <Boot />
         <IntentResumer />
+        <CameraBackdrop />
         <ErrorBoundary><RheaScene /></ErrorBoundary>
         <HudGate />
       </div>

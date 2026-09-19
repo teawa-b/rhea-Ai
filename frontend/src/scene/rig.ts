@@ -12,6 +12,8 @@ export const rig: {
   yaw: number; pitch: number; vy: number; vp: number; dist: number; offsetX: number;
   targetYaw: number; targetPitch: number; targetDist: number; targetOffsetX: number;
   dragging: boolean; idleT: number; autoRotate: boolean; tweening: boolean; lastUserInput: number;
+  /** two-finger pinch in progress: the globe's own drag handler stands down so zooming doesn't also spin it */
+  pinching: boolean;
 } = {
   yaw: -Math.PI / 2 + 98 * (Math.PI / 180), // start facing the US-ish
   pitch: 0.36,
@@ -29,6 +31,7 @@ export const rig: {
   /** while true the tween owns yaw/pitch (user drag cancels it) */
   tweening: false,
   lastUserInput: 0,
+  pinching: false,
 };
 
 /* Scripted camera flight for "take me there": rotate to face the place first

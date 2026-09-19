@@ -1,11 +1,12 @@
 /* The Canvas: lights, environment, the globe rig and its children, XR wrapper.
  *
- * Mixed reality first: the XR store offers `immersive-ar` (Quest passthrough).
- * Per Meta's WebXR MR guidance the content must be drawn on a transparent
- * background, so the renderer is created with alpha and the void backdrop,
- * fog and starfield are only mounted outside AR sessions. */
+ * Mixed reality first: the XR store offers `immersive-ar` (Quest passthrough,
+ * and handheld AR on Android phones — see handheld.ts). Per Meta's WebXR MR
+ * guidance the content must be drawn on a transparent background, so the
+ * renderer is created with alpha and the void backdrop, fog and starfield are
+ * only mounted outside AR sessions and the phone camera view. */
 import { Canvas, useFrame } from "@react-three/fiber";
-import { XR, createXRStore, useXR } from "@react-three/xr";
+import { XR, useXR } from "@react-three/xr";
 import { Suspense, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { C } from "@/theme";
@@ -15,26 +16,11 @@ import { Connections } from "./Connections";
 import { CountryPins } from "./CountryPins";
 import { Globe, Stars } from "./Globe";
 import { HoldingsPlanet } from "./HoldingsPlanet";
-import { RheaController } from "./XRController";
+import { useHandheld } from "./handheld";
 import { XRPanels } from "./XRPanels";
+import { xrStore } from "./xrStore";
 
-/* One XR store for the app. Hands + controllers; passthrough via immersive-ar. */
-export const xrStore = createXRStore({
-  hand: true,
-  /* Stock controller model + pointers, with "hold A to speak" tags on the right hand. */
-  controller: RheaController,
-  frameBufferScaling: "high",
-  foveation: 0.6,
-  anchors: false,
-  hitTest: false,
-  planeDetection: false,
-  meshDetection: false,
-  /* Let Quest Browser offer the session from its own UI too. */
-  offerSession: "immersive-ar",
-  /* Dev emulator (localhost only, when no WebXR runtime exists): Quest 3, no
-   * synthetic room — its bundled Three.js is incompatible with ours. */
-  emulate: { type: "metaQuest3", syntheticEnvironment: false },
-});
+export { xrStore };
 
 /** Enter passthrough MR when the device supports it, otherwise VR. */
 export async function enterImmersive(): Promise<"immersive-ar" | "immersive-vr" | null> {
@@ -58,7 +44,9 @@ type RateSession = XRSession & { updateTargetFrameRate?: (r: number) => Promise<
 function Environment() {
   const mode = useXR((s) => s.mode);
   const session = useXR((s) => s.session);
-  const passthrough = mode === "immersive-ar";
+  /* Phone camera view: the rear camera shows through the transparent canvas, so no void, fog or stars either. */
+  const cameraView = useHandheld((s) => s.active === "camera");
+  const passthrough = mode === "immersive-ar" || cameraView;
   const perf = useRef({ start: 0, frames: 0, slow: 0, settled: false });
   useEffect(() => {
     perf.current = { start: 0, frames: 0, slow: 0, settled: false };
@@ -99,12 +87,13 @@ function Environment() {
 }
 
 export function RheaScene() {
+  const cameraView = useHandheld((s) => s.active === "camera");
   return (
     <Canvas
       camera={{ position: [0, 0, 3.4], fov: 38, near: 0.05, far: 120 }}
       dpr={[1, 2]}
       gl={{ antialias: true, alpha: true, premultipliedAlpha: true, powerPreference: "high-performance", toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}
-      style={{ position: "absolute", inset: 0, background: C.void }}
+      style={{ position: "absolute", inset: 0, background: cameraView ? "transparent" : C.void }}
     >
       <XR store={xrStore}>
         <Environment />

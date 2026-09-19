@@ -354,6 +354,23 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
   .xr-cta-text { font-size: 14px; letter-spacing: 0.18em; }
 }
 
+/* ---------- handheld AR (phones) ----------
+ * WebXR path: the browser shows only `.ar-overlay` over the camera feed, so the HUD is portalled into it. Camera-view
+ * path: a <video> sits behind the transparent canvas. Both use the compact `.hud.ar` layout. */
+.ar-overlay { position: fixed; inset: 0; background: transparent; }
+.ar-overlay-inner { position: absolute; inset: 0; touch-action: none; }
+.app.camera-view { background: #000; }
+.camera-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.hud.ar .arbar { display: flex; align-items: center; gap: 8px; padding: max(10px, env(safe-area-inset-top)) 12px 4px; }
+.hud.ar .arbar .ar-exit { gap: 4px; padding-left: 8px; }
+.hud.ar .arbar .ar-mode { margin-left: auto; padding: 5px 10px; border-radius: 999px; font-size: 11px; gap: 6px; }
+.hud.ar .stage .right { bottom: 88px; max-height: 50vh; }
+.hud.ar .captions .caption { background: rgba(11, 15, 28, 0.82); }
+.hud.ar .crumbs, .hud.ar .chip { backdrop-filter: blur(10px); }
+.hud.ar .bottombar { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.ar-btn { gap: 6px; margin-left: auto; border-color: rgba(63,224,255,0.45); }
+.ar-btn:disabled { opacity: 0.6; }
+
 /* Company logo chips in panel lists */
 .co-logo { flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px rgba(63,224,255,0.25), 0 0 10px rgba(153,69,255,0.18); }
 .co-logo.mono-logo { display: grid; place-items: center; font-weight: 800; letter-spacing: 0.02em; color: #fff; background: linear-gradient(135deg, var(--sol), var(--cyan-deep)); }
