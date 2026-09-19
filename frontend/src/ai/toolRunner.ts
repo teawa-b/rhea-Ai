@@ -52,6 +52,28 @@ async function companyProfile(q: string) {
     activeOrders: orders.map((o) => ({ id: o.id, rule: describeRule(o), simulated: !!o.simulated })),
     corporateActions: d.corporateActions.map((c) => ({ caType: c.caType ?? c.type, effectiveAt: c.effectiveAt, upcoming: c.upcoming ?? false, netAmount: c.netAmount ?? null, grossAmount: c.grossAmount ?? null, detail: c.detail })),
     reserves: d.reserves ? `${d.reserves.symbol} ${d.reserves.backedPct}% backed (${d.reserves.custodian})` : null,
+    /* A private company has no exchange behind it. The model must not describe
+     * the mark as a stock price, quote a session, or call the token a share. */
+    privateCompany: co.private
+      ? {
+          note: "Not listed on any exchange. The reference is the issuer's mark on the exposure behind the token, not a market price, and there is no trading session — the Solana market runs continuously.",
+          markPriceUsd: p.markPriceUsd ?? null,
+          premiumToMarkPct: p.premiumToMarkPct ?? null,
+          impliedValuationUsd: p.impliedValuationUsd ?? null,
+          instrument: d.asset?.issuerKey === "prestocks"
+            ? "A PreStock: an issuer token backed 1:1 by SPV exposure tracking the private company's price. Economic exposure only — no ownership, voting, dividend or information rights — and not affiliated with or endorsed by the company. Not available in the US or to US persons."
+            : null,
+        }
+      : null,
+    /* More than one issuer wrapping the same company: different instruments
+     * with different backing, so never present them as the same quote. */
+    wrappers: (d.wrappers ?? []).length > 1
+      ? (d.wrappers ?? []).map((w) => ({
+          symbol: w.asset.symbol, issuer: w.asset.issuer, tokenPriceUsd: w.price.tokenPriceUsd,
+          premiumToMarkPct: w.price.premiumToMarkPct ?? null, tradable: w.asset.tradable,
+          liquidityUsd: w.asset.liquidityUsd ?? null,
+        }))
+      : null,
   };
 }
 
@@ -283,6 +305,53 @@ export function createToolRunner(getAuth: () => RheaAuth) {
       }
       case "get_company_profile":
         return companyProfile(str(args.company));
+      case "show_private_markets": {
+        useWorld.getState().showPrivateMarkets(true);
+        const pm = await api.privateMarkets();
+        return {
+          ok: true,
+          issuer: pm.issuer,
+          instrument: "PreStocks are issuer tokens backed 1:1 by SPV exposure tracking a private company's price. Economic exposure only — no ownership, voting or dividends — and not endorsed by the company.",
+          restrictedJurisdictions: pm.restrictedJurisdictions,
+          companies: pm.assets.map((a) => ({
+            company: a.companyName, symbol: a.symbol, sector: a.sector,
+            onchainPriceUsd: a.tokenPriceUsd, issuerMarkUsd: a.markPriceUsd,
+            premiumToMarkPct: a.premiumToMarkPct,
+            impliedValuationUsd: a.impliedValuationUsd, issuerValuationUsd: a.markValuationUsd,
+            holders: a.holders, liquidityUsd: a.liquidityUsd, tradable: a.tradable,
+            markUnavailable: a.markUnavailable,
+          })),
+          note: "premiumToMarkPct is the onchain price against the issuer's own mark. A positive number means the market is paying above what PreStocks marks the exposure at; a negative one means below.",
+        };
+      }
+      case "design_bonding_curve": {
+        const co = needCompany(str(args.company));
+        useWorld.getState().showDbcStudio(co.id);
+        const supply = num(args.totalTokenSupply);
+        const plan = await api.dbcPlan({
+          companyId: co.id,
+          ...(str(args.preset) ? { presetId: str(args.preset) } : {}),
+          ...(Number.isFinite(supply) && supply > 0 ? { totalTokenSupply: supply } : {}),
+        });
+        return {
+          ok: true,
+          company: co.name,
+          preset: plan.preset.name,
+          referencePriceUsd: plan.referencePriceUsd,
+          referenceSource: plan.referenceSource,
+          startPriceUsd: plan.startPriceUsd,
+          anchorBand: [plan.bandLowPriceUsd, plan.bandHighPriceUsd],
+          migrationPriceUsd: plan.migrationPriceUsd,
+          raiseToGraduate: plan.migrationQuoteThreshold,
+          quoteSymbol: plan.quote.symbol,
+          totalTokenSupply: plan.totalTokenSupply,
+          segments: plan.segments.map((sg) => ({ name: sg.name, from: sg.lowerPriceUsd, to: sg.upperPriceUsd, shareOfRaisePct: sg.sharePct })),
+          fee: `${plan.fee.startingFeeBps} bps decaying to ${plan.fee.endingFeeBps} bps over ${plan.fee.decayMinutes} minutes`,
+          configValidates: plan.valid,
+          warnings: plan.warnings,
+          note: "This is a design, not a launch. Rhea cannot create, sign or fund a pool — the user takes the config to Meteora themselves.",
+        };
+      }
       case "get_historical_prices": {
         const co = needCompany(str(args.company));
         const range = (str(args.range).toUpperCase() || "1M") as ChartRange;

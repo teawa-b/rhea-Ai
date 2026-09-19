@@ -5,6 +5,18 @@
 export type CountryCode =
   | "US" | "CN" | "HK" | "TW" | "GB" | "JP" | "DK" | "NL" | "DE" | "FR" | "CH" | "KR" | "IN" | "CA" | "AU" | "SG" | "IE" | "IT";
 
+/** Who wrapped the company into a Solana token: Backed's xStocks for listed
+ *  equities, PreStocks for private, pre-IPO companies. */
+export type IssuerKey = "xstocks" | "prestocks";
+
+/** A tokenized wrapper beyond the company's primary one. */
+export type CompanyWrapper = {
+  issuerKey: IssuerKey;
+  /** Onchain symbol as Jupiter reports it, e.g. "NVDAx" */
+  tokenSymbol: string;
+  mint: string;
+};
+
 export type Company = {
   id: string;               // slug, e.g. "nvidia"
   name: string;             // "NVIDIA"
@@ -25,11 +37,25 @@ export type Company = {
   seedMint?: string;
   /** Issuer icon URL from the xStocks catalog */
   icon?: string;
+  /** A pre-IPO company: no exchange listing, so no session and no last trade.
+   *  Its reference price is the issuer's mark, never an equity feed. */
+  private?: boolean;
+  /** Issuer behind `tokenSymbol` (the company's primary wrapper). Defaults to xStocks. */
+  issuerKey?: IssuerKey;
+  /** Additional wrappers of the same company by other issuers. */
+  wrappers?: CompanyWrapper[];
 };
 
 export type TokenizedAsset = {
-  id: string;               // `${companyId}:solana`
+  /** `${companyId}:solana` for a company's primary wrapper, suffixed with the
+   *  issuer key for any additional one (`acme:solana:prestocks`). Stable: saved
+   *  orders and cached state key off it. */
+  id: string;
   companyId: string;
+  /** Which issuer wrapped it. */
+  issuerKey: IssuerKey;
+  /** The company's primary wrapper — the one a bare "buy SpaceX" resolves to. */
+  primary: boolean;
   chain: "solana";
   mint: string;
   symbol: string;
@@ -51,9 +77,16 @@ export type PriceSnapshot = {
   mint: string;
   /** Executable onchain token price (Jupiter Price v3) */
   tokenPriceUsd: number | null;
-  /** Underlying equity reference price (Pyth Pro or Jupiter stockData) */
+  /** Reference price for the underlying. For a listed company that is the
+   *  equity price; for a private one it is the issuer's mark on the portfolio. */
   underlyingPriceUsd: number | null;
-  underlyingSource: "pyth" | "jupiter-stockdata" | "yahoo" | "none";
+  underlyingSource: "pyth" | "jupiter-stockdata" | "yahoo" | "issuer-mark" | "none";
+  /** Private companies only: the issuer's published mark per token, and what the
+   *  onchain price is paying over (+) or under (-) it. */
+  markPriceUsd?: number | null;
+  premiumToMarkPct?: number | null;
+  /** The whole company's worth implied by the onchain price. */
+  impliedValuationUsd?: number | null;
   change24hPct: number | null;
   marketSession: "regular" | "pre_market" | "post_market" | "closed" | "unknown";
   /** ISO timestamps so the UI can show data age (trust principle #7/#8) */
@@ -108,6 +141,171 @@ export type ProofOfReserves = {
   asOf: string;
 };
 
+/* ---------------- Private (pre-IPO) markets ---------------- */
+
+/** One PreStock, straight from the issuer's public catalog. */
+export type PreStockMark = {
+  name: string;              // "OpenAI PreStocks"
+  symbol: string;            // "OPENAI"
+  mint: string;
+  /** The issuer's one-paragraph description of the company. */
+  description: string;
+  image?: string;
+  url?: string;
+  /** Issuer's mark per token — the reference price, since the company is private. */
+  markPriceUsd: number | null;
+  /** What the issuer marks the whole company at. */
+  markValuationUsd: number | null;
+  /** The issuer's own snapshot of the onchain price. */
+  tokenPriceUsd: number | null;
+  /** markValuation scaled by tokenPrice / markPrice, as the issuer publishes it. */
+  impliedValuationUsd: number | null;
+  supply: number | null;
+  fetchedAt: string;
+};
+
+/** A private company's live picture: what the issuer marks it at, what the
+ *  onchain market actually pays, and what that implies the company is worth. */
+export type PrivateMarketSnapshot = {
+  companyId: string;
+  companyName: string;
+  mint: string;
+  symbol: string;
+  issuer: string;
+  sector: string;
+  /** Executable onchain price (Jupiter Price v3). */
+  tokenPriceUsd: number | null;
+  /** Issuer's mark per token (PreStocks). */
+  markPriceUsd: number | null;
+  markValuationUsd: number | null;
+  /** markValuation scaled by the premium the market is paying. */
+  impliedValuationUsd: number | null;
+  /** Onchain price vs the issuer mark, in %. Positive = paying above mark. */
+  premiumToMarkPct: number | null;
+  holders: number | null;
+  liquidityUsd: number | null;
+  change24hPct: number | null;
+  tradable: boolean;
+  markFetchedAt: string | null;
+  /** True when the issuer API was unreachable and only onchain data is shown. */
+  markUnavailable: boolean;
+};
+
+export type PrivateMarketsOverview = {
+  assets: PrivateMarketSnapshot[];
+  issuer: string;
+  disclosure: string;
+  disclosureUrl: string;
+  termsUrl: string;
+  restrictedJurisdictions: string[];
+  fetchedAt: string;
+};
+
+/* ---------------- Meteora DBC studio ---------------- */
+
+/** A curve shape tuned for one kind of equity. */
+export type DbcPreset = {
+  id: string;
+  name: string;
+  summary: string;
+  /** Curve opens this far below the reference price. */
+  launchDiscountPct: number;
+  /** Half-width of the thick anchor band around the reference price. */
+  bandPct: number;
+  /** Migration price sits this far above the reference. */
+  ceilingPct: number;
+  /** Anchor-segment liquidity relative to the thin segments either side. */
+  anchorWeight: number;
+  startingFeeBps: number;
+  endingFeeBps: number;
+  feeDecayMinutes: number;
+};
+
+export type DbcPlanInput = {
+  baseSymbol: string;
+  baseName?: string;
+  baseDecimals?: number;
+  baseTokenType?: "spl" | "token2022";
+  quoteSymbol?: string;
+  quoteMint?: string;
+  quoteDecimals?: number;
+  /** True when quoting in another tokenized stock rather than a stablecoin. */
+  quoteIsTokenizedStock?: boolean;
+  /** Price the curve is anchored on, in quote units per base token. */
+  referencePriceUsd: number;
+  /** Where that price came from — shown next to every number it produces. */
+  referenceSource: string;
+  referenceAt?: string | null;
+  totalTokenSupply?: number;
+  presetId?: string;
+  launchDiscountPct?: number;
+  bandPct?: number;
+  ceilingPct?: number;
+  anchorWeight?: number;
+  /** Address that receives leftover base tokens. The program requires one; the
+   *  planner will not invent it. */
+  leftoverReceiver?: string;
+};
+
+export type DbcCurveSegment = {
+  name: string;
+  lowerPriceUsd: number;
+  upperPriceUsd: number;
+  /** Quote tokens needed to move price across this segment. */
+  quoteIn: number;
+  /** Base tokens sold across it. */
+  baseOut: number;
+  liquidityWeight: number;
+  /** This segment's share of the total raise, as a %. */
+  sharePct: number;
+};
+
+export type DbcCurvePlan = {
+  base: { symbol: string; name: string; decimals: number; tokenType: string };
+  quote: { symbol: string; mint: string; decimals: number; isTokenizedStock: boolean };
+  preset: DbcPreset;
+  referencePriceUsd: number;
+  referenceSource: string;
+  referenceAt: string | null;
+  startPriceUsd: number;
+  bandLowPriceUsd: number;
+  bandHighPriceUsd: number;
+  migrationPriceUsd: number;
+  launchDiscountPct: number;
+  bandPct: number;
+  ceilingPct: number;
+  anchorWeight: number;
+  totalTokenSupply: number;
+  segments: DbcCurveSegment[];
+  totalQuoteToMigrate: number;
+  totalBaseSold: number;
+  migrationQuoteThreshold: number;
+  fee: { startingFeeBps: number; endingFeeBps: number; decayMinutes: number; dynamicFeeEnabled: boolean };
+  /** Whether the SDK's own validator accepted this config. */
+  valid: boolean;
+  validationError: string | null;
+  warnings: string[];
+  /** Null until the caller names one — the program rejects a launch without it. */
+  leftoverReceiver: string | null;
+  /** The ConfigParameters object, ready for createConfig. */
+  config: unknown;
+};
+
+export type DbcPoolStatus = {
+  poolAddress: string;
+  baseMint: string;
+  config: string;
+  creator: string;
+  migrated: boolean;
+  quoteProgressPct: number | null;
+  baseProgressPct: number | null;
+  quoteReserve: number;
+  migrationQuoteThreshold: number | null;
+  currentPriceUsd: number | null;
+  unclaimedQuoteFee: number | null;
+  fetchedAt: string;
+};
+
 export type ChartRange = "1D" | "5D" | "1M" | "3M" | "1Y" | "5Y" | "MAX";
 
 export type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
@@ -116,9 +314,13 @@ export type ChartHistory = {
   companyId: string;
   range: ChartRange;
   resolution: string;
-  source: "pyth" | "yahoo";
+  /** "none" when no series exists at all — a private company has no exchange
+   *  history to chart, which is a real answer rather than a failure. */
+  source: "pyth" | "yahoo" | "none";
   candles: Candle[];
   fetchedAt: string;
+  /** Set when candles are empty by design; the UI says this instead of spinning. */
+  unavailableReason?: string;
 };
 
 export type NewsEvent = {

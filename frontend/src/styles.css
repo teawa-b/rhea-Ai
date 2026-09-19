@@ -374,3 +374,48 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
 /* Company logo chips in panel lists */
 .co-logo { flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px rgba(63,224,255,0.25), 0 0 10px rgba(153,69,255,0.18); }
 .co-logo.mono-logo { display: grid; place-items: center; font-weight: 800; letter-spacing: 0.02em; color: #fff; background: linear-gradient(135deg, var(--sol), var(--cyan-deep)); }
+
+/* Collapsible panel sections. The company panel answers seven questions at
+   once; only price, chart and trade stay open, and the rest sit behind these
+   so the panel reads as an answer rather than a dump. */
+.sect {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: 0; padding: 9px 0; cursor: pointer;
+  color: var(--frost); font-family: inherit; font-size: 11px;
+  letter-spacing: 0.12em; text-transform: uppercase; text-align: left;
+}
+.sect:hover { color: var(--cyan); }
+.sect .caret {
+  margin-left: auto; font-size: 13px; line-height: 1; opacity: 0.7;
+  transition: transform 140ms ease;
+}
+.sect[aria-expanded="true"] .caret { transform: rotate(90deg); }
+.sect .count {
+  font-size: 10px; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 999px;
+  border: 1px solid rgba(143,232,255,0.35); text-transform: none;
+}
+.sect-body { padding-bottom: 4px; }
+@media (prefers-reduced-motion: reduce) { .sect .caret { transition: none; } }
+
+/* Price header: one number carries the panel. The change rides its baseline
+   so the pair reads as a single object rather than two stacked facts. */
+.price { display: flex; align-items: baseline; gap: 10px; }
+.price-now {
+  font-family: var(--mono); font-size: 32px; font-weight: 600;
+  letter-spacing: -0.02em; line-height: 1.05; color: #fff;
+}
+.price-chg { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+
+/* The chart sat in its own bordered box inside the panel's bordered box. One
+   frame is enough; the plot keeps a faint ground so the line has something to
+   sit on. */
+.chart-wrap canvas { border: 0; background: rgba(5,6,13,0.35); }
+
+/* Section rhythm: the divider already separates, so it does not also need a
+   wide margin on the side that touches a section header. */
+.sect + .sect-body { padding-top: 2px; }
+.divider + .sect { margin-top: -2px; }
+
+@media (max-width: 600px) {
+  .price-now { font-size: 28px; }
+}

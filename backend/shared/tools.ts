@@ -204,6 +204,31 @@ export const RHEA_TOOLS: ToolDef[] = [
   },
   {
     type: "function",
+    name: "show_private_markets",
+    description:
+      "Open the pre-IPO panel and return every private company Rhea can price: the issuer's mark per token, the executable onchain price, the premium or discount between them, implied and issuer valuations, holders and liquidity. Use for 'pre-IPO', 'private companies', 'OpenAI', 'Anthropic', 'SpaceX', 'Anduril', 'what's OpenAI worth', or any question about a company that is not listed on an exchange. These are issuer tokens backed 1:1 by SPV exposure, giving economic exposure only and not endorsed by the company — say so before discussing buying one.",
+    parameters: obj({}),
+  },
+  {
+    type: "function",
+    name: "design_bonding_curve",
+    description:
+      "Open the curve studio and plan a Meteora Dynamic Bonding Curve for launching a tokenized version of a company, anchored on its live reference price (the equity price for a listed company, the issuer's mark for a private one). Returns the price band, where the raise lands across the curve's segments, the raise needed to graduate into DAMM v2, and the fee schedule. This only designs and explains a curve — it never launches one, and Rhea cannot sign or fund a pool.",
+    parameters: obj(
+      {
+        company: companyParam,
+        preset: {
+          type: "string",
+          enum: ["blue-chip", "thin-listing", "pre-ipo"],
+          description: "Curve shape. Omit to let Rhea pick: pre-ipo for a private company, blue-chip otherwise.",
+        },
+        totalTokenSupply: { type: "number", description: "Optional token supply to plan against." },
+      },
+      ["company"],
+    ),
+  },
+  {
+    type: "function",
     name: "get_company_profile",
     description: "Company profile + live prices: underlying equity price, executable onchain token price, 24h change, market session, data timestamps, tokenized asset (mint, issuer, tradable), user position and active orders.",
     parameters: obj({ company: companyParam }, ["company"]),

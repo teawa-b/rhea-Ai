@@ -181,16 +181,38 @@ export function drawChart(ctx: CanvasRenderingContext2D, o: ChartDrawOpts) {
     ctx.fillText(label, x(t), H - 7);
   }
 
-  /* Header row: ticker · range · session   |   data source */
+  /* Header row: ticker · range · session   |   data source.
+   *
+   * These three used to be drawn at fixed positions, so on a phone the session
+   * label ran straight through the data-source label. Each one is measured and
+   * dropped in priority order instead: the ticker always survives, the session
+   * goes next, and the provenance label goes last — it is the least useful of
+   * the three at a glance and it is repeated in the panel anyway. */
   ctx.textAlign = "left"; ctx.font = "700 10px Inter, system-ui, sans-serif";
   ctx.fillStyle = FR;
   const head = `${o.ticker} · ${o.range}${o.focusTs ? " · FOCUS" : ""}`;
   ctx.fillText(head, padL + 2, 12);
   const headW = ctx.measureText(head).width;
-  ctx.fillStyle = o.marketOpen ? GR : MUTED;
-  ctx.fillText(o.marketOpen ? "● MARKET OPEN" : "○ MARKET CLOSED", padL + 2 + headW + 12, 12);
-  ctx.textAlign = "right"; ctx.fillStyle = ar ? "#dfe9f5" : "rgba(142,163,189,0.75)"; ctx.font = "9px Inter, system-ui, sans-serif";
-  ctx.fillText(`data: ${o.source}`, W - 6, 12);
+
+  const session = o.marketOpen ? "● MARKET OPEN" : "○ MARKET CLOSED";
+  const sessionX = padL + 2 + headW + 12;
+  const sessionW = ctx.measureText(session).width;
+  ctx.font = "9px Inter, system-ui, sans-serif";
+  const sourceW = ctx.measureText(`data: ${o.source}`).width;
+  const GAP = 10;
+
+  const roomForSession = sessionX + sessionW <= W - 6;
+  if (roomForSession) {
+    ctx.font = "700 10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = o.marketOpen ? GR : MUTED;
+    ctx.fillText(session, sessionX, 12);
+  }
+  const usedRight = roomForSession ? sessionX + sessionW : padL + 2 + headW;
+  if (usedRight + GAP + sourceW <= W - 6) {
+    ctx.textAlign = "right"; ctx.fillStyle = ar ? "#dfe9f5" : "rgba(142,163,189,0.75)";
+    ctx.font = "9px Inter, system-ui, sans-serif";
+    ctx.fillText(`data: ${o.source}`, W - 6, 12);
+  }
   noHalo();
   ctx.restore();
 }
