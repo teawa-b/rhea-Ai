@@ -2,11 +2,12 @@
  * immersive XR (troika text, no DOM). Optional second line and accent bar. */
 import { Billboard, Text } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { C } from "@/theme";
 import { FONT_BODY, FONT_BOLD } from "./fonts";
 import { GlassRect } from "./glass";
+import { useLogoTexture } from "./logoTexture";
 import { DIST, rig } from "./rig";
 import { feel } from "./xrFeedback";
 
@@ -26,21 +27,6 @@ type Props = {
   icon?: string;
 };
 
-/* One texture per logo URL, shared by every chip that shows it. */
-const logoCache = new Map<string, THREE.Texture | null>();
-const loader = new THREE.TextureLoader().setCrossOrigin("anonymous");
-function useLogo(url?: string) {
-  const [tex, setTex] = useState<THREE.Texture | null>(() => (url ? logoCache.get(url) ?? null : null));
-  useEffect(() => {
-    if (!url) { setTex(null); return; }
-    if (logoCache.has(url)) { setTex(logoCache.get(url) ?? null); return; }
-    let live = true;
-    loader.load(url, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; logoCache.set(url, t); if (live) setTex(t); }, undefined, () => { logoCache.set(url, null); });
-    return () => { live = false; };
-  }, [url]);
-  return tex;
-}
-
 const CHAR_W = 0.074; // approx bold uppercase advance at fontSize 0.1, until troika reports the real width
 
 /** Laid-out width of a troika text block, once it has synced. */
@@ -54,7 +40,7 @@ function useTextWidth() {
 }
 
 export function HoloLabel({ position, title, subtitle, accent = C.cyan, scale = 1, dim = false, onClick, opacity = 1, icon }: Props) {
-  const logo = useLogo(icon);
+  const logo = useLogoTexture(icon);
   const h = subtitle ? 0.26 : 0.17;
   /* Room for the logo tile on the left when one is loaded. */
   const iconW = logo ? h - 0.04 + 0.03 : 0;
