@@ -7,6 +7,7 @@ import { setVoiceAuth, useVoice, wireContextUpdates } from "@/ai/voice";
 import { analyticsSummary, track, wireAnalytics } from "@/analytics";
 import { RheaScene, enterImmersive, xrStore } from "@/scene/RheaScene";
 import { xrGlobe } from "@/scene/CameraRig";
+import { arAnchor, consumeTap, emitArTap } from "@/scene/arPlace";
 import { arOverlayRoot, detectHandheld, enterHandheld, exitHandheld, useHandheld } from "@/scene/handheld";
 import { rig } from "@/scene/rig";
 import { describeIntent, resumeIntent } from "@/solana/trade";
@@ -28,10 +29,14 @@ function Boot() {
     wireContextUpdates();
     wireAnalytics();
     void detectHandheld();
+    /* Opening a place came from tapping a marker, so AR placement must not also move the globe. */
+    const unfocus = useWorld.subscribe((s, p) => {
+      if (s.focusedCompany !== p.focusedCompany || s.focusedCountry !== p.focusedCountry) consumeTap();
+    });
     const h = setInterval(() => void loadOverview(), 5 * 60_000);
     /* dev handle for poking the world from the console */
-    (window as unknown as { rhea: unknown }).rhea = { world: useWorld, market: useMarket, rig, xrGlobe, voice: useVoice, analytics: analyticsSummary, enterImmersive, xrStore, handheld: useHandheld, enterHandheld, exitHandheld };
-    return () => clearInterval(h);
+    (window as unknown as { rhea: unknown }).rhea = { world: useWorld, market: useMarket, rig, xrGlobe, voice: useVoice, analytics: analyticsSummary, enterImmersive, xrStore, handheld: useHandheld, enterHandheld, exitHandheld, arAnchor };
+    return () => { clearInterval(h); unfocus(); };
   }, [loadOverview, loadStatus]);
   return null;
 }
@@ -108,7 +113,7 @@ function HudGate() {
  * scene (beforexrselect), while taps on empty screen still reach the markers. */
 function ArOverlay({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  useGlobeGestures(ref, { dragAnywhere: true });
+  useGlobeGestures(ref, { dragAnywhere: true, onTap: emitArTap });
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -137,8 +142,9 @@ function CameraBackdrop() {
 export function App() {
   const appRef = useRef<HTMLDivElement>(null);
   const cameraView = useHandheld((s) => s.active === "camera");
-  /* Pinch-to-zoom for every touch screen; drag-from-anywhere in the camera view (the globe is small over a busy feed). */
-  useGlobeGestures(appRef, { dragAnywhere: cameraView });
+  /* Pinch-to-zoom for every touch screen; drag-from-anywhere in the camera view (the globe is small over a
+   * busy feed), where a tap on empty screen also moves the globe to where you tapped. */
+  useGlobeGestures(appRef, { dragAnywhere: cameraView, onTap: cameraView ? emitArTap : undefined });
   return (
     <RheaAuthProvider>
       <div className={`app${cameraView ? " camera-view" : ""}`} ref={appRef}>

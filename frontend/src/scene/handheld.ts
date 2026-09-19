@@ -16,6 +16,7 @@
 import { create } from "zustand";
 import { track } from "@/analytics";
 import { useVoice } from "@/ai/voice";
+import { resetAnchor } from "./arPlace";
 import { gyro, startGyro, stopGyro } from "./gyro";
 import { recenterXR } from "./CameraRig";
 import { xrStore } from "./xrStore";
@@ -82,7 +83,7 @@ export async function enterHandheld(): Promise<boolean> {
       const overlay = (session as XRSession & { domOverlayState?: { type: string } | null }).domOverlayState;
       if (!overlay) console.warn("[ar] session has no DOM overlay; the HUD will not be visible until you exit");
       track("webxr_entered", "handheld-ar");
-      notice("Move your phone to look around. Drag to spin the globe, pinch to zoom.");
+      notice("Point at a floor or table and tap to place the globe. Drag to spin it, pinch to zoom.");
       return true;
     }
     /* Sensor permission first (it needs the tap's activation), then the camera. */
@@ -91,7 +92,7 @@ export async function enterHandheld(): Promise<boolean> {
     useHandheld.setState({ active: "camera", stream, gyro: tracked });
     track("webxr_entered", tracked ? "handheld-gyro" : "handheld-camera");
     notice(tracked
-      ? "The globe is anchored where you're pointing. Turn to look around; tap the target to re-place it."
+      ? "Tap anywhere to move the globe there. It stays put as you turn; drag it to spin, pinch to zoom."
       : "Camera view: no motion sensor here, so the globe follows the phone. Drag to spin, pinch to zoom.");
     return true;
   } catch (e) {
@@ -116,12 +117,14 @@ export function exitHandheld() {
   }
   stream?.getTracks().forEach((t) => t.stop());
   stopGyro();
+  resetAnchor();
   useHandheld.setState({ active: null, stream: null, gyro: false });
 }
 
-/** Puts the globe back in front of the phone: re-seats the WebXR anchor, or re-aims the gyro anchor. */
+/** Puts the globe back in front of the phone: drops any tapped placement and re-seats the anchor. */
 export function recenterHandheld() {
   const { active } = useHandheld.getState();
+  resetAnchor();
   if (active === "webxr") recenterXR();
   else if (active === "camera") gyro.recalibrate = true;
 }
@@ -143,7 +146,7 @@ export async function leaveHandheldForDom(): Promise<void> {
 /* A WebXR session ending for any reason (Exit AR, the browser's own close button, a tab switch) drops back to the
  * flat view. Camera streams that lose their track (another app grabbed the camera) do the same. */
 xrStore.subscribe((s, prev) => {
-  if (prev.session && !s.session && useHandheld.getState().active === "webxr") useHandheld.setState({ active: null });
+  if (prev.session && !s.session && useHandheld.getState().active === "webxr") { resetAnchor(); useHandheld.setState({ active: null }); }
 });
 useHandheld.subscribe((s, prev) => {
   if (s.stream && s.stream !== prev.stream) {

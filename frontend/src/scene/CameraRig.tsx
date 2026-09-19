@@ -14,6 +14,7 @@ import { useMarket } from "@/state/market";
 import { REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
 import { clamp, damp } from "./geo";
+import { arAnchor } from "./arPlace";
 import { gyro } from "./gyro";
 import { useHandheld } from "./handheld";
 import { DIST, endFlight, flyTo, releaseToWorld, rig, stepFlight } from "./rig";
@@ -55,7 +56,8 @@ const HH_SCALE_PANEL = 0.19;
  * the live feed as the phone turns. */
 const GYRO_FOV = 64;
 const DESKTOP_FOV = 38;
-const _anchorDir = new THREE.Vector3(0, 0, -1);
+/** How far a bottom sheet lifts a placed globe so the sheet doesn't cover it. */
+const HH_PANEL_LIFT = HH_CENTER_PANEL.y - HH_CENTER.y;
 /* The head pose every layout constant above is authored against. XrHeadAnchor
  * moves that frame onto the user's real head at session start, so the planet
  * lands in front of them whether they stand, sit, or start off-centre. */
@@ -218,7 +220,17 @@ export function CameraRig({ children }: { children: ReactNode }) {
       if (handheld) {
         const s = THREE.MathUtils.lerp(THREE.MathUtils.lerp(HH_BASE_SCALE, HH_SCALE_NEAR, zoomT), HH_SCALE_PANEL, x.chartK);
         g.scale.setScalar(s);
-        g.position.lerpVectors(HH_CENTER, HH_CENTER_PANEL, x.chartK);
+        if (arAnchor.point) {
+          /* Tapped into the room. A hit point lies on the surface and the globe's origin is
+           * its centre, so resting it there means lifting by one (scaled) radius. */
+          _focal.copy(arAnchor.point);
+          if (g.parent) g.parent.worldToLocal(_focal);
+          if (arAnchor.onSurface) _focal.y += s;
+          _focal.y += HH_PANEL_LIFT * x.chartK;
+          g.position.lerp(_focal, 1 - Math.exp(-dt * 9));
+        } else {
+          g.position.lerpVectors(HH_CENTER, HH_CENTER_PANEL, x.chartK);
+        }
         xrGlobe.pos.copy(g.position); xrGlobe.scale = s; xrGlobe.chartK = x.chartK;
         return;
       }
@@ -250,13 +262,13 @@ export function CameraRig({ children }: { children: ReactNode }) {
       if (cam.fov !== GYRO_FOV) { cam.fov = GYRO_FOV; cam.updateProjectionMatrix(); }
       cam.position.set(0, 0, 0);
       cam.quaternion.copy(gyro.q);
-      if (gyro.recalibrate) { _anchorDir.set(0, 0, -1).applyQuaternion(gyro.q).normalize(); gyro.recalibrate = false; }
+      if (gyro.recalibrate) { arAnchor.dir.set(0, 0, -1).applyQuaternion(gyro.q).normalize(); gyro.recalibrate = false; }
       const aspect = cam.aspect || 1;
       const fit = Math.max(1, 1.05 / aspect);
       /* Same on-screen size as the flat view despite the wider FOV. */
       const d = rig.dist * fit * (Math.tan((DESKTOP_FOV / 2) * Math.PI / 180) / Math.tan((GYRO_FOV / 2) * Math.PI / 180));
       g.scale.setScalar(1);
-      g.position.copy(_anchorDir).multiplyScalar(d);
+      g.position.copy(arAnchor.dir).multiplyScalar(d);
     } else {
       const cam = camera as THREE.PerspectiveCamera;
       if (cam.fov !== DESKTOP_FOV) { cam.fov = DESKTOP_FOV; cam.updateProjectionMatrix(); }

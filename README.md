@@ -104,13 +104,15 @@ Quest browser). What it does depends on the device:
 
 | Device | Path | What you get |
 | --- | --- | --- |
-| Android Chrome | WebXR `immersive-ar` + `dom-overlay` | Full AR: the globe is a world-locked object ~1 m in front of where you started; walk around it, ARCore tracks position and rotation. The normal HUD stays on screen over the camera feed. |
-| iOS Safari (no WebXR) | rear camera behind the transparent canvas + gyroscope | Labelled **AR · gyro**: the globe is anchored to the direction you pointed at when you entered and stays there as you turn (rotation tracked; walking isn't, Safari has no WebXR). Without a motion sensor it degrades to a plain **Camera view** and says so. |
+| Android Chrome | WebXR `immersive-ar` + `dom-overlay` + hit test | Full AR: a reticle tracks the real surface you point at, and a tap rests the globe on it. Walk around it — ARCore tracks position and rotation. The normal HUD stays on screen over the camera feed. |
+| iOS Safari (no WebXR) | rear camera behind the transparent canvas + gyroscope | Labelled **AR · gyro**: tap anywhere to move the globe there; it holds that direction as you turn (rotation tracked; walking isn't, Safari has no WebXR). Without a motion sensor it degrades to a plain **Camera view** and says so. |
 
 In either mode the HUD collapses to the essentials — an **Exit AR** bar (plus **Recenter**, which re-places
 the globe in front of you), crumbs, captions, the voice orb and the ask box; the brand, market chip, session pill and
-account row step aside. Drag anywhere to spin the globe, pinch to zoom (pinch works on every touch screen,
-AR or not). Panels open as bottom sheets and the globe rises above them. Wallet prompts are DOM modals
+account row step aside. Tap empty space to move the globe there, drag it to spin, pinch to zoom (pinch works
+on every touch screen, AR or not); taps that hit the planet, a marker or a HUD control are left alone. Panels
+open as bottom sheets and the globe rises above them. Where a runtime advertises hit test but refuses it, a
+tap still places the globe, floating at arm's length rather than resting on a surface. Wallet prompts are DOM modals
 a WebXR session would hide, so confirming a trade or signing in leaves AR first and tells you so.
 
 Camera access needs a secure origin (`npm run dev:https` on your LAN, or the deployment). `?ar=1` forces the

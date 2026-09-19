@@ -221,10 +221,10 @@ export function Hud() {
         /* AR: the brand, market chip and account row step aside; one slim bar with the way out (and recenter on tracked devices). */
         <div className="arbar">
           <button className="btn sm ar-exit" onClick={exitHandheld} title="Back to the flat view"><ChevronLeftIcon size={14} />Exit AR</button>
-          <span className="chip dim ar-mode" title={ar === "webxr" ? "Tracked AR: the globe is fixed in your room; walk around it" : arGyro ? "Anchored by the motion sensor: turn to look around (position isn't tracked without WebXR)" : "Camera view: no motion sensor, the globe follows the phone"}>
+          <span className="chip dim ar-mode" title={ar === "webxr" ? "Tracked AR: tap a surface to place the globe, then walk around it" : arGyro ? "Tap to move the globe; it stays put as you turn (position isn't tracked without WebXR)" : "Camera view: no motion sensor, the globe follows the phone"}>
             <i className={`dot ${arTracked ? "on" : "warn"}`} />{ar === "webxr" ? "AR" : arGyro ? "AR · gyro" : "Camera view"}
           </span>
-          {arTracked ? <button className="btn ghost sm" onClick={() => { resetGlobe(false); recenterHandheld(); }} title="Re-place the globe in front of you" aria-label="Recenter"><RecenterIcon size={15} /></button> : null}
+          {arTracked ? <button className="btn ghost sm" onClick={() => { resetGlobe(false); recenterHandheld(); }} title="Put the globe back in front of you" aria-label="Recenter"><RecenterIcon size={15} /></button> : null}
         </div>
       ) : (
       <div className="topbar">
