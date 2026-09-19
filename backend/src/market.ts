@@ -3,15 +3,20 @@ import type { Request, Response, Router } from "express";
 import express from "express";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  COMPANIES, COMPANY_BY_ID, COMPANY_BY_TOKEN, COUNTRIES, MIN_TRADE_LIQUIDITY_USD, TRIGGER_MIN_ORDER_USD, USDC_MINT,
+  COMPANIES, COMPANY_BY_ID, COMPANY_BY_TOKEN, COUNTRIES, MIN_TRADE_LIQUIDITY_USD,
+  TESSERA_DISCLOSURE_URL, TESSERA_ISSUER, TESSERA_MIN_TRADE_USD, TESSERA_RESTRICTED_JURISDICTIONS, TESSERA_TERMS_URL,
+  TRIGGER_MIN_ORDER_USD, USDC_MINT,
   XSTOCKS_DISCLOSURE_URL, XSTOCKS_MIN_TRADE_USD, XSTOCKS_RESTRICTED_JURISDICTIONS, resolveCompany,
 } from "../shared/registry";
 import type {
   AssetCapability, Briefing, BriefingDistribution, BriefingHolding, ChartRange, Company, CorporateAction, CountrySummary, EligibilityResult,
-  MarketOverview, Portfolio, Position, TokenizedAsset,
+  MarketOverview, Portfolio, Position, PrivateMarketSnapshot, PrivateMarketsOverview, TokenizedAsset,
 } from "../shared/types";
 import { hasPythKey, history, lastCloseFor, priceSnapshot, sessionInfo } from "./feeds";
 import { JupiterError, executeSwap, getPrices, getSwapQuote, hasJupiterKey, listTokenizedAssets, triggerProxy, type JupPrice } from "./jupiter";
+import {
+  TESSERA_DISCLOSURE, impliedValuation, premiumToMark, tesseraProofOfReserve, tesseraTokens,
+} from "./tessera";
 import { corporateActions, proofOfReserves, type XCorporateAction } from "./xstocks";
 
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
@@ -38,9 +43,24 @@ function fail(res: Response, e: unknown, fallback = "Couldn't reach Jupiter righ
   res.status(502).json({ error: fallback, ...(IS_PROD ? {} : { debug: raw }) });
 }
 
+/** The company's primary wrapper — what a bare "buy SpaceX" resolves to. */
 async function assetFor(companyId: string): Promise<TokenizedAsset | undefined> {
   const assets = await listTokenizedAssets();
-  return assets.find((a) => a.companyId === companyId);
+  const mine = assets.filter((a) => a.companyId === companyId);
+  return mine.find((a) => a.primary) ?? mine[0];
+}
+
+/** Every tokenized wrapper of a company, primary first, then by liquidity. */
+async function assetsFor(companyId: string): Promise<TokenizedAsset[]> {
+  const assets = await listTokenizedAssets();
+  return assets
+    .filter((a) => a.companyId === companyId)
+    .sort((a, b) => Number(b.primary) - Number(a.primary) || (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0));
+}
+
+/** One wrapper by asset id, so the client can price a specific issuer's token. */
+async function assetById(assetId: string): Promise<TokenizedAsset | undefined> {
+  return (await listTokenizedAssets()).find((a) => a.id === assetId);
 }
 
 /* ---------------- Overview ---------------- */
@@ -70,19 +90,84 @@ export async function buildOverview(): Promise<MarketOverview> {
   };
 }
 
+/* ---------------- Private (pre-IPO) markets ----------------
+ *
+ * The companies here are not listed anywhere, so none of the equity machinery
+ * applies: no session, no close, no Pyth feed. What a viewer needs instead is
+ * the issuer's mark, the price the onchain market is actually paying, and the
+ * gap between the two — plus where the backing is attested.
+ */
+
+/** Tessera's display symbol for a wrapper ("tSpaceX" -> "T-SpaceX"). */
+function tesseraSymbolFor(asset: TokenizedAsset): string {
+  const code = asset.symbol;
+  return /^t[A-Z]/.test(code) ? `T-${code.slice(1)}` : code;
+}
+
+export async function buildPrivateMarkets(): Promise<PrivateMarketsOverview> {
+  const [assets, marks] = await Promise.all([listTokenizedAssets(), tesseraTokens()]);
+  const tTokens = assets.filter((a) => a.issuerKey === "tessera");
+
+  const out: PrivateMarketSnapshot[] = [];
+  for (const a of tTokens) {
+    const co = COMPANY_BY_ID[a.companyId];
+    if (!co) continue;
+    const mark = marks?.find((m) => m.mint === a.mint) ?? null;
+    const prices = await getPrices([a.mint]).catch(() => ({} as Record<string, JupPrice>));
+    const p = prices[a.mint];
+    const tokenPrice = p?.usdPrice ?? null;
+    const premium = premiumToMark(tokenPrice, mark?.markPriceUsd);
+    const display = mark?.symbol ?? tesseraSymbolFor(a);
+    out.push({
+      companyId: co.id,
+      companyName: co.name,
+      mint: a.mint,
+      symbol: display,
+      issuer: TESSERA_ISSUER,
+      sector: mark?.sector ?? co.sector,
+      tokenPriceUsd: tokenPrice,
+      markPriceUsd: mark?.markPriceUsd ?? null,
+      markValuationUsd: mark?.markValuationUsd ?? null,
+      impliedValuationUsd: impliedValuation(tokenPrice, mark),
+      premiumToMarkPct: premium == null ? null : Math.round(premium * 100) / 100,
+      /* Holder counts: the issuer's own figure first, Jupiter's as a fallback. */
+      holders: mark?.holders ?? a.holderCount ?? null,
+      liquidityUsd: a.liquidityUsd ?? null,
+      change24hPct: p?.priceChange24h ?? null,
+      tradable: a.tradable,
+      markFetchedAt: mark?.fetchedAt ?? null,
+      attestation: tesseraProofOfReserve(display),
+      markUnavailable: mark == null,
+    });
+  }
+  /* Biggest implied valuation first — that is the order people scan them in. */
+  out.sort((x, y) => (y.impliedValuationUsd ?? 0) - (x.impliedValuationUsd ?? 0));
+
+  return {
+    assets: out,
+    issuer: TESSERA_ISSUER,
+    disclosure: TESSERA_DISCLOSURE,
+    disclosureUrl: TESSERA_DISCLOSURE_URL,
+    termsUrl: TESSERA_TERMS_URL,
+    restrictedJurisdictions: TESSERA_RESTRICTED_JURISDICTIONS,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 /* ---------------- Trade checks: liquidity floor + minimums ---------------- */
 
 export function capabilityFor(asset: TokenizedAsset): AssetCapability {
+  const tessera = asset.issuerKey === "tessera";
   return {
     assetId: asset.id,
     issuer: asset.issuer,
     supportedJurisdictions: "all",
-    restrictedJurisdictions: XSTOCKS_RESTRICTED_JURISDICTIONS,
+    restrictedJurisdictions: tessera ? TESSERA_RESTRICTED_JURISDICTIONS : XSTOCKS_RESTRICTED_JURISDICTIONS,
     requiresKyc: false,
     tradable: asset.tradable,
     transferable: true,
-    minimumTradeUsd: XSTOCKS_MIN_TRADE_USD,
-    disclosureUrl: XSTOCKS_DISCLOSURE_URL,
+    minimumTradeUsd: tessera ? TESSERA_MIN_TRADE_USD : XSTOCKS_MIN_TRADE_USD,
+    disclosureUrl: tessera ? TESSERA_DISCLOSURE_URL : XSTOCKS_DISCLOSURE_URL,
   };
 }
 
@@ -91,10 +176,17 @@ export const XSTOCKS_DISCLOSURE =
   `They carry issuer, market, liquidity and smart-contract risk, and their price can move outside regular US trading hours. ` +
   `This is not investment advice.`;
 
+/** The disclosure that belongs to whoever issued this token. */
+export function disclosureFor(asset: TokenizedAsset | undefined): { disclosure: string; disclosureUrl: string } {
+  return asset?.issuerKey === "tessera"
+    ? { disclosure: TESSERA_DISCLOSURE, disclosureUrl: TESSERA_DISCLOSURE_URL }
+    : { disclosure: XSTOCKS_DISCLOSURE, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
+}
+
 export function checkEligibility(asset: TokenizedAsset | undefined, action: "buy" | "sell" | "trigger", amountUsd?: number): EligibilityResult {
   const reasons: string[] = [];
-  const disclosure = XSTOCKS_DISCLOSURE;
-  if (!asset) return { allowed: false, reasons: ["This company has no tokenized asset on Solana yet."], disclosure, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
+  const { disclosure, disclosureUrl } = disclosureFor(asset);
+  if (!asset) return { allowed: false, reasons: ["This company has no tokenized asset on Solana yet."], disclosure, disclosureUrl };
   const cap = capabilityFor(asset);
   const liquidity = asset.liquidityUsd ?? 0;
   /* Sells stay open at any liquidity so a holder is never locked in. */
@@ -395,18 +487,36 @@ export function marketRouter(): Router {
     catch (e) { bad(res, 502, (e as Error).message); }
   });
 
+  r.get("/private", async (_req, res) => {
+    try { res.json(await buildPrivateMarkets()); }
+    catch (e) { bad(res, 502, (e as Error).message); }
+  });
+
   r.get("/company/:id", async (req: Request, res: Response) => {
     const co = COMPANY_BY_ID[String(req.params.id)] ?? resolveCompany(String(req.params.id));
     if (!co) return bad(res, 404, "Unknown company");
     try {
-      const asset = await assetFor(co.id);
-      /* xStocks calls resolve to null on failure, so they never fail the panel. */
+      const all = await assetsFor(co.id);
+      const asset = all.find((a) => a.primary) ?? all[0];
+      /* Issuer calls resolve to null on failure, so they never fail the panel. */
       const [price, xca, reserves] = await Promise.all([priceSnapshot(co, asset), corporateActions(co.tokenSymbol), proofOfReserves(co.tokenSymbol)]);
+      /* A company can be wrapped by more than one issuer (SpaceX: Backed and
+       * Tessera). Price each separately — they are different instruments with
+       * different backing, and their prices routinely diverge. */
+      const wrappers = await Promise.all(all.map(async (a) => ({
+        asset: a,
+        price: a.id === asset?.id ? price : await priceSnapshot(co, a),
+        capability: capabilityFor(a),
+        ...disclosureFor(a),
+        attestation: a.issuerKey === "tessera" ? tesseraProofOfReserve(tesseraSymbolFor(a)) : null,
+      })));
       res.json({
         company: co, asset: asset ?? null, price,
         corporateActions: classifyCorporateActions(co.id, xca, price.rebase),
         reserves,
         capability: asset ? capabilityFor(asset) : null,
+        ...disclosureFor(asset),
+        wrappers,
       });
     } catch (e) { bad(res, 502, (e as Error).message); }
   });

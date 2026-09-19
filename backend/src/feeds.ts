@@ -13,6 +13,7 @@
 import { COMPANY_BY_ID } from "../shared/registry";
 import type { Candle, ChartHistory, ChartRange, Company, MarketSessionInfo, PriceSnapshot, SessionLabel, TokenizedAsset } from "../shared/types";
 import { getPrices } from "./jupiter";
+import { impliedValuation, premiumToMark, tesseraByMint } from "./tessera";
 import { xstocksAsset } from "./xstocks";
 
 const PYTH_KEY = process.env.PYTH_PRO_API_KEY || "";
@@ -225,11 +226,64 @@ export async function lastCloseFor(company: Company): Promise<{ lastCloseUsd: nu
 
 /* ---------------- Snapshot ---------------- */
 
+/* ---------------- Private markets: T-Token snapshot ----------------
+ *
+ * A private company has no exchange, so there is no last trade, no session and
+ * no close to gap against. The reference is the issuer's mark on the segregated
+ * portfolio, and the number that matters is what the onchain market is paying
+ * over (or under) it. Jupiter's `stockData` is deliberately ignored here: for
+ * Tessera mints it reports the company on a different notional basis than the
+ * token, so dividing by it invents a discount that does not exist.
+ */
+async function tesseraSnapshot(company: Company, asset: TokenizedAsset): Promise<PriceSnapshot> {
+  const mint = asset.mint;
+  const [jup, mark] = await Promise.all([
+    getPrices([mint]).then((m) => m[mint]).catch(() => undefined),
+    tesseraByMint(mint),
+  ]);
+
+  const tokenPrice = jup?.usdPrice ?? null;
+  const tokenAt = jup ? new Date().toISOString() : null;
+  const premium = premiumToMark(tokenPrice, mark?.markPriceUsd);
+  const newest = [mark?.fetchedAt ?? null, tokenAt].filter(Boolean).map((v) => Date.parse(v as string));
+  /* Nothing to compare against, or the onchain price never arrived. */
+  const stale = tokenPrice == null || newest.length === 0;
+
+  return {
+    companyId: company.id,
+    mint,
+    tokenPriceUsd: tokenPrice,
+    underlyingPriceUsd: mark?.markPriceUsd ?? null,
+    underlyingSource: mark?.markPriceUsd != null ? "tessera-mark" : "none",
+    markPriceUsd: mark?.markPriceUsd ?? null,
+    premiumToMarkPct: premium == null ? null : Math.round(premium * 100) / 100,
+    impliedValuationUsd: impliedValuation(tokenPrice, mark),
+    change24hPct: jup?.priceChange24h ?? null,
+    /* No exchange behind a private company: there is no session to report. */
+    marketSession: "unknown",
+    tokenUpdatedAt: tokenAt,
+    underlyingUpdatedAt: mark?.fetchedAt ?? null,
+    stale,
+    /* No equity close exists, so these stay unset rather than borrowing a
+     * number from a listed company that happens to share a ticker. */
+    lastCloseUsd: null,
+    lastCloseAt: null,
+    gapVsClosePct: null,
+    xstocksPeriod: null,
+    xstocksOpenNow: null,
+    halted: null,
+    nextRegularOpenAt: null,
+  };
+}
+
 export async function priceSnapshot(company: Company, asset: TokenizedAsset | undefined): Promise<PriceSnapshot> {
+  /* Branch on the asset's issuer, not the company's: SpaceX is wrapped by both
+   * Backed and Tessera, and only the T-Token is priced against an issuer mark. */
+  if (asset?.issuerKey === "tessera") return tesseraSnapshot(company, asset);
   const mint = asset?.mint ?? "";
   const [jup, pyth, session, info, close, xs] = await Promise.all([
     mint ? getPrices([mint]).then((m) => m[mint]).catch(() => undefined) : Promise.resolve(undefined),
-    pythLatest(company),
+    company.private ? Promise.resolve(null) : pythLatest(company),
     marketSession(company),
     sessionInfo(company),
     lastCloseFor(company),
@@ -241,7 +295,7 @@ export async function priceSnapshot(company: Company, asset: TokenizedAsset | un
   let underlyingAt: string | null = null;
   if (pyth) { underlying = pyth.price; underlyingSource = "pyth"; underlyingAt = pyth.at; }
   else if (jup?.stockData?.price) { underlying = jup.stockData.price; underlyingSource = "jupiter-stockdata"; underlyingAt = jup.stockData.updatedAt; }
-  else {
+  else if (!company.private) {
     const m = await yahooMeta(company.yahooSymbol ?? company.ticker);
     if (m?.regularMarketPrice) {
       underlying = m.regularMarketPrice; underlyingSource = "yahoo";

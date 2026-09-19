@@ -15,7 +15,7 @@
  * `featured` companies are the polished set that get a hero marker in the
  * country view (spec §3.3: "a limited set of polished company locations").
  */
-import type { Company, CountryCode } from "./types";
+import type { Company, CompanyWrapper, CountryCode, IssuerKey } from "./types";
 import { XSTOCKS_CATALOG } from "./xstocks-catalog";
 
 /** A token is "tradable" only when Jupiter reports at least this much onchain
@@ -57,6 +57,14 @@ export const ISO_NUMERIC_TO_CODE: Record<string, CountryCode> = {
   "208": "DK", "528": "NL", "276": "DE", "250": "FR", "756": "CH", "410": "KR",
   "356": "IN", "124": "CA", "036": "AU", "702": "SG", "372": "IE", "380": "IT",
 };
+
+/* Tessera T-Token mints. Seeds only — the live catalog in backend/src/tessera.ts
+ * refreshes them, and every price, mark and count is fetched at runtime. */
+export const TESSERA_MINTS = {
+  tOpenAI: "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ",
+  tKalshi: "TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ",
+  tSpaceX: "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v",
+} as const;
 
 const c = (
   id: string, name: string, ticker: string, countryCode: CountryCode, sector: string,
@@ -144,8 +152,11 @@ const CURATED: Company[] = [
     { name: "Livingston, New Jersey", lat: 40.7959, lng: -74.3149 }),
   c("applovin", "AppLovin", "APP", "US", "Ad-tech", "APPx",
     { name: "Palo Alto, California", lat: 37.4419, lng: -122.1430 }),
+  /* Two issuers wrap SpaceX: Backed's SPCXx (primary) and Tessera's tSpaceX.
+   * Both are listed so the company panel can price them side by side. */
   c("spacex", "SpaceX", "SPCX", "US", "Aerospace (private)", "SPCXx",
-    { name: "Starbase, Texas", lat: 25.9972, lng: -97.1560 }),
+    { name: "Starbase, Texas", lat: 25.9972, lng: -97.1560 },
+    { private: true, wrappers: [{ issuerKey: "tessera", tokenSymbol: "tSpaceX", mint: TESSERA_MINTS.tSpaceX }] }),
   c("sp500", "S&P 500 ETF", "SPY", "US", "Index Fund", "SPYx", undefined),
   c("nasdaq100", "Nasdaq-100 ETF", "QQQ", "US", "Index Fund", "QQQx", undefined),
   c("gold", "Gold Trust", "GLD", "US", "Commodity Fund", "GLDx", undefined),
@@ -277,6 +288,30 @@ const CURATED: Company[] = [
 ];
 
 
+/* ---------------- Private (pre-IPO) companies ----------------
+ *
+ * These are NOT in the xStocks catalog: the companies are private, so no
+ * exchange lists them and Backed has no tracker certificate for two of the
+ * three. Tessera wraps them as T-Tokens on Solana instead, and Rhea places them
+ * on the globe at their real headquarters like any other company.
+ *
+ * The mints below are seeds so the globe still renders when Tessera's API is
+ * unreachable. What is actually shown — marks, valuations, holders, which
+ * markets are live — always comes from the live issuer API at runtime
+ * (backend/src/tessera.ts); nothing here is a price.
+ */
+/* A private company has no ticker, so `ticker` carries the name a person would
+ * actually say. There is no pythSymbol and no yahooSymbol by design: querying an
+ * equity feed for an unlisted company returns someone else's stock. */
+const PRIVATE_COMPANIES: Company[] = [
+  c("openai", "OpenAI", "OPENAI", "US", "Artificial Intelligence", "tOpenAI",
+    { name: "Mission Bay, San Francisco", lat: 37.7679, lng: -122.3915 },
+    { featured: true, private: true, issuerKey: "tessera", seedMint: TESSERA_MINTS.tOpenAI }),
+  c("kalshi", "Kalshi", "KALSHI", "US", "Prediction Markets", "tKalshi",
+    { name: "New York, New York", lat: 40.7411, lng: -74.0059 },
+    { featured: true, private: true, issuerKey: "tessera", seedMint: TESSERA_MINTS.tKalshi }),
+];
+
 /* ---------------- Build COMPANIES from the catalog ---------------- */
 
 const CURATED_BY_TOKEN = new Map(CURATED.map((co) => [co.tokenSymbol.toUpperCase(), co]));
@@ -286,7 +321,7 @@ const CURATED_BY_TOKEN = new Map(CURATED.map((co) => [co.tokenSymbol.toUpperCase
  * (or unset) sits in the US bucket until someone curates it. */
 const listingCountry = (c: string | null): CountryCode => (c && c in COUNTRIES ? (c as CountryCode) : "US");
 
-export const COMPANIES: Company[] = XSTOCKS_CATALOG.map((entry) => {
+export const COMPANIES: Company[] = XSTOCKS_CATALOG.map((entry): Company => {
   const cur = CURATED_BY_TOKEN.get(entry.symbol.toUpperCase());
   if (cur) return { ...cur, seedMint: entry.mint, icon: entry.icon };
   return {
@@ -299,10 +334,32 @@ export const COMPANIES: Company[] = XSTOCKS_CATALOG.map((entry) => {
     seedMint: entry.mint,
     icon: entry.icon,
   };
-});
+}).concat(PRIVATE_COMPANIES);
 
 export const COMPANY_BY_ID = Object.fromEntries(COMPANIES.map((co) => [co.id, co])) as Record<string, Company>;
-export const COMPANY_BY_TOKEN = Object.fromEntries(COMPANIES.map((co) => [co.tokenSymbol.toUpperCase(), co])) as Record<string, Company>;
+/* Primary wrappers first, then secondary ones — a company's own tokenSymbol
+ * always wins, so "SPCXx" and "tSpaceX" both resolve to SpaceX without a
+ * secondary wrapper ever shadowing another company's primary token. */
+export const COMPANY_BY_TOKEN = (() => {
+  const m: Record<string, Company> = {};
+  for (const co of COMPANIES) for (const w of co.wrappers ?? []) m[w.tokenSymbol.toUpperCase()] = co;
+  for (const co of COMPANIES) m[co.tokenSymbol.toUpperCase()] = co;
+  return m;
+})();
+
+/** Every tokenized wrapper of a company, primary first. */
+export function wrappersFor(co: Company): CompanyWrapper[] {
+  return [
+    { issuerKey: co.issuerKey ?? "xstocks", tokenSymbol: co.tokenSymbol, mint: co.seedMint ?? "" },
+    ...(co.wrappers ?? []),
+  ];
+}
+
+/** Stable asset id: the primary wrapper keeps the historical `id:solana` form
+ *  so saved orders and cached state stay valid. */
+export function assetIdFor(companyId: string, issuerKey: IssuerKey, primary: boolean): string {
+  return primary ? `${companyId}:solana` : `${companyId}:solana:${issuerKey}`;
+}
 
 /* Loose matching used by the AI tools: "nvidia", "NVDA", "NVDAx", "Nvidia Corp".
  * Exact matches first; fuzzy matches only on whole words so "China" never
@@ -338,6 +395,7 @@ const COMPANY_ALIASES: Record<string, string> = {
   "novo": "novo-nordisk", astra: "astrazeneca", "arm holdings": "arm", "hong kong exchanges": "hkex", "hkex": "hkex", "spacex": "spacex",
   "united health": "unitedhealth", "space x": "spacex", "core weave": "coreweave", "app lovin": "applovin", "micron": "micron",
   "p&g": "procter-gamble", "procter and gamble": "procter-gamble", "bofa": "bank-of-america", "bank of america": "bank-of-america",
+  "open ai": "openai", openai: "openai", chatgpt: "openai", "kalshi": "kalshi",
   "goldman": "goldman-sachs", "strc": "strategy-strc", "dfdv": "defi-development", "defi dev": "defi-development", "russell 2000": "iwm",
 };
 
@@ -367,6 +425,18 @@ export function resolveCountry(query: string): CountryDef | undefined {
 export const XSTOCKS_DISCLOSURE_URL = "https://xstocks.com/";
 export const XSTOCKS_RESTRICTED_JURISDICTIONS = ["US", "GB", "CA", "AU"];
 export const XSTOCKS_MIN_TRADE_USD = 1;
+
+/* ---- Tessera T-Tokens (private markets) ----
+ * A T-Token is a loan participation right against a Tessera issuer entity, not
+ * equity and not a security — the holder is repaid from the proceeds of a
+ * qualifying liquidity event. Tessera's terms exclude several jurisdictions,
+ * the United States and China among them. The check is self-declared, not KYC.
+ * https://docs.tessera.pe/overview/how-do-tessera-token-work */
+export const TESSERA_ISSUER = "Tessera (T-Tokens)";
+export const TESSERA_DISCLOSURE_URL = "https://docs.tessera.pe/overview/how-do-tessera-token-work";
+export const TESSERA_TERMS_URL = "https://terms.tessera.pe";
+export const TESSERA_RESTRICTED_JURISDICTIONS = ["US", "CN"];
+export const TESSERA_MIN_TRADE_USD = 1;
 /** Jupiter Trigger V2 rejects deposits worth less than this (400 at deposit/craft). */
 export const TRIGGER_MIN_ORDER_USD = 10;
 

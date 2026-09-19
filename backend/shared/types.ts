@@ -5,6 +5,18 @@
 export type CountryCode =
   | "US" | "CN" | "HK" | "TW" | "GB" | "JP" | "DK" | "NL" | "DE" | "FR" | "CH" | "KR" | "IN" | "CA" | "AU" | "SG" | "IE" | "IT";
 
+/** Who wrapped the company into a Solana token. A company can have more than
+ *  one: SpaceX is tokenized by both Backed (xStocks) and Tessera. */
+export type IssuerKey = "xstocks" | "tessera";
+
+/** A tokenized wrapper beyond the company's primary one. */
+export type CompanyWrapper = {
+  issuerKey: IssuerKey;
+  /** Onchain symbol as Jupiter reports it, e.g. "tSpaceX" */
+  tokenSymbol: string;
+  mint: string;
+};
+
 export type Company = {
   id: string;               // slug, e.g. "nvidia"
   name: string;             // "NVIDIA"
@@ -25,11 +37,25 @@ export type Company = {
   seedMint?: string;
   /** Issuer icon URL from the xStocks catalog */
   icon?: string;
+  /** A pre-IPO company: no exchange listing, so no session and no last trade.
+   *  Its reference price is the issuer's mark, never an equity feed. */
+  private?: boolean;
+  /** Issuer behind `tokenSymbol` (the company's primary wrapper). Defaults to xStocks. */
+  issuerKey?: IssuerKey;
+  /** Additional wrappers of the same company by other issuers. */
+  wrappers?: CompanyWrapper[];
 };
 
 export type TokenizedAsset = {
-  id: string;               // `${companyId}:solana`
+  /** `${companyId}:solana` for a company's primary wrapper, suffixed with the
+   *  issuer key for any additional one (`spacex:solana:tessera`). Stable: saved
+   *  orders and cached state key off it. */
+  id: string;
   companyId: string;
+  /** Which issuer wrapped it. */
+  issuerKey: IssuerKey;
+  /** The company's primary wrapper — the one a bare "buy SpaceX" resolves to. */
+  primary: boolean;
   chain: "solana";
   mint: string;
   symbol: string;
@@ -51,9 +77,16 @@ export type PriceSnapshot = {
   mint: string;
   /** Executable onchain token price (Jupiter Price v3) */
   tokenPriceUsd: number | null;
-  /** Underlying equity reference price (Pyth Pro or Jupiter stockData) */
+  /** Reference price for the underlying. For a listed company that is the
+   *  equity price; for a private one it is the issuer's mark on the portfolio. */
   underlyingPriceUsd: number | null;
-  underlyingSource: "pyth" | "jupiter-stockdata" | "yahoo" | "none";
+  underlyingSource: "pyth" | "jupiter-stockdata" | "yahoo" | "tessera-mark" | "none";
+  /** Private companies only: the issuer's published mark per token, and what the
+   *  onchain price is paying over (+) or under (-) it. */
+  markPriceUsd?: number | null;
+  premiumToMarkPct?: number | null;
+  /** The whole company's worth implied by the onchain price. */
+  impliedValuationUsd?: number | null;
   change24hPct: number | null;
   marketSession: "regular" | "pre_market" | "post_market" | "closed" | "unknown";
   /** ISO timestamps so the UI can show data age (trust principle #7/#8) */
@@ -106,6 +139,74 @@ export type ProofOfReserves = {
   shares: number;
   circulating: number;
   asOf: string;
+};
+
+/* ---------------- Private (pre-IPO) markets ---------------- */
+
+/** A T-Token's issuer mark, straight from Tessera's public API. */
+export type TesseraMark = {
+  id: string;
+  name: string;              // "T-OpenAI"
+  symbol: string;            // "T-OpenAI"
+  code: string;              // onchain ticker as Jupiter shows it, "tOpenAI"
+  sector: string;
+  mint: string;
+  /** Issuer's mark per token. The only figure comparable to the onchain price. */
+  markPriceUsd: number | null;
+  /** What the issuer marks the whole company at. */
+  markValuationUsd: number | null;
+  holders: number | null;
+  fetchedAt: string;
+};
+
+/** Where a private-market token's backing is attested, and by whom. Distinct
+ *  from ProofOfReserves: Chainlink's T-Token streams publish attested unit
+ *  counts on a roughly monthly cadence, so there is no live backed-% to quote. */
+export type ReserveAttestation = {
+  symbol: string;
+  issuer: string;
+  custodian: string;
+  verifier: string;
+  attestationUrl: string;
+  note: string;
+};
+
+/** A private company's live picture: what the issuer marks it at, what the
+ *  onchain market actually pays, and what that implies the company is worth. */
+export type PrivateMarketSnapshot = {
+  companyId: string;
+  companyName: string;
+  mint: string;
+  symbol: string;
+  issuer: string;
+  sector: string;
+  /** Executable onchain price (Jupiter Price v3). */
+  tokenPriceUsd: number | null;
+  /** Issuer's mark per token (Tessera). */
+  markPriceUsd: number | null;
+  markValuationUsd: number | null;
+  /** markValuation scaled by the premium the market is paying. */
+  impliedValuationUsd: number | null;
+  /** Onchain price vs the issuer mark, in %. Positive = paying above mark. */
+  premiumToMarkPct: number | null;
+  holders: number | null;
+  liquidityUsd: number | null;
+  change24hPct: number | null;
+  tradable: boolean;
+  markFetchedAt: string | null;
+  attestation: ReserveAttestation | null;
+  /** True when the issuer API was unreachable and only onchain data is shown. */
+  markUnavailable: boolean;
+};
+
+export type PrivateMarketsOverview = {
+  assets: PrivateMarketSnapshot[];
+  issuer: string;
+  disclosure: string;
+  disclosureUrl: string;
+  termsUrl: string;
+  restrictedJurisdictions: string[];
+  fetchedAt: string;
 };
 
 export type ChartRange = "1D" | "5D" | "1M" | "3M" | "1Y" | "5Y" | "MAX";
