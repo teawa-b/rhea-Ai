@@ -5,6 +5,8 @@ import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
 import { VERIFIED_ON_MAINNET } from "@/demo/verified";
+import { recenterXR } from "@/scene/CameraRig";
+import { enterHandheld, exitHandheld, useHandheld } from "@/scene/handheld";
 import { DEMO_WALLET, sessionPill, startSessionPolling, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { fmtEt, fmtPct, fmtUsd, solscanTx } from "@/theme";
@@ -13,7 +15,7 @@ import { DbcStudioPanel } from "./DbcStudioPanel";
 import { PrivateMarketsPanel } from "./PrivateMarketsPanel";
 import { CoLogo } from "./CoLogo";
 import { CountryPanel } from "./CountryPanel";
-import { ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon } from "./icons";
+import { ArIcon, ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon, RecenterIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
 import { RegionPanel } from "./RegionPanel";
 import { REGION_BY_ID } from "@/state/regions";
@@ -148,6 +150,10 @@ export function Hud() {
   const [text, setText] = useState("");
   const narrow = useNarrow();
   const showCrumbs = view !== "world" || Boolean(comparison) || showPortfolio;
+  /* Phone AR. `ar` is the running mode; `arSupport` decides whether the button exists at all (never on desktop). */
+  const ar = useHandheld((s) => s.active);
+  const arSupport = useHandheld((s) => s.support);
+  const arEntering = useHandheld((s) => s.entering);
   const [xrMode, setXrMode] = useState<"immersive-ar" | "immersive-vr" | null>(null);
   const capRef = useRef<HTMLDivElement>(null);
 
@@ -208,8 +214,18 @@ export function Hud() {
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
 
   return (
-    <div className="hud">
+    <div className={`hud${ar ? " ar" : ""}`}>
       {/* ---------- top bar ---------- */}
+      {ar ? (
+        /* AR: the brand, market chip and account row step aside; one slim bar with the way out (and recenter on tracked devices). */
+        <div className="arbar">
+          <button className="btn sm ar-exit" onClick={exitHandheld} title="Back to the flat view"><ChevronLeftIcon size={14} />Exit AR</button>
+          <span className="chip dim ar-mode" title={ar === "webxr" ? "Tracked AR: move your phone to look around" : "Camera view: not tracked, drag to spin"}>
+            <i className={`dot ${ar === "webxr" ? "on" : "warn"}`} />{ar === "webxr" ? "AR" : "Camera view"}
+          </span>
+          {ar === "webxr" ? <button className="btn ghost sm" onClick={() => { resetGlobe(false); recenterXR(); }} title="Bring the globe back in front of you" aria-label="Recenter"><RecenterIcon size={15} /></button> : null}
+        </div>
+      ) : (
       <div className="topbar">
         <div className="brand">
           <div className="brand-mark"><Logo /></div>
@@ -252,15 +268,16 @@ export function Hud() {
           )}
         </div>
       </div>
+      )}
 
-      {xrMode ? <XrLaunch mode={xrMode} /> : null}
+      {xrMode && !ar ? <XrLaunch mode={xrMode} /> : null}
 
       {/* ---------- stage ---------- */}
       <div className={`stage ${showPanel ? "" : "no-panel"}`}>
         <div className="left">
           {/* Phones: the rising panel covers the second row, so the trail wins there (the panel repeats the session). */}
-          {!(narrow && showCrumbs) ? <SessionPill /> : null}
-          {!(narrow && showCrumbs) ? <VerifiedOnMainnet /> : null}
+          {!(narrow && showCrumbs) && !ar ? <SessionPill /> : null}
+          {!(narrow && showCrumbs) && !ar ? <VerifiedOnMainnet /> : null}
           {showCrumbs ? (
             <nav className="crumbs clickable" aria-label="Where you are">
               <button className="crumb-back" onClick={goBack} title="Back" aria-label="Back"><ChevronLeftIcon size={16} /></button>
@@ -279,7 +296,7 @@ export function Hud() {
               {showPortfolio ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Holdings</span></>) : null}
             </nav>
           ) : null}
-          <div className="captions scroll" ref={capRef} style={{ maxHeight: "34vh" }}>
+          <div className="captions scroll" ref={capRef} style={{ maxHeight: ar ? "24vh" : "34vh" }}>
             {captions.map((c) => (
               <div key={c.id} className={`caption ${c.role}`}>
                 <span className="who">{c.role === "user" ? "You" : "Rhea"}</span>
@@ -352,6 +369,11 @@ export function Hud() {
             {voiceSub}
           </div>
           {voiceState !== "off" && voiceState !== "connecting" ? <button className="btn ghost sm" onClick={disconnect}>End</button> : null}
+          {arSupport && !ar ? (
+            <button className="btn ghost sm ar-btn" onClick={() => void enterHandheld()} disabled={arEntering} title={arSupport === "webxr" ? "Put the globe in your room (AR)" : "Show the globe over your camera"} aria-label="Enter AR">
+              <ArIcon size={16} />{arEntering ? "Starting…" : "AR"}
+            </button>
+          ) : null}
         </div>
         <form className="row clickable ask" onSubmit={(e) => { e.preventDefault(); const q = text.trim(); if (!q) return; sendText(q, auth); setText(""); }}>
           <input className="chip ask-input" placeholder={`Ask Rhea… e.g. "Why is Nvidia moving?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />

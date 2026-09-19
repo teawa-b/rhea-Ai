@@ -97,6 +97,25 @@ desktop first (Privy's login is a web flow); the same wallet is used in the head
 On a desktop without WebXR, `localhost` gets a built-in Quest 3 emulator (IWER) so the MR layout can be
 previewed — `node frontend/scripts/qa-xr.mjs <name>` captures it headlessly.
 
+### On a phone — AR
+
+Phones get one extra control: an **AR** button beside the voice orb (never shown on desktop or in the
+Quest browser). What it does depends on the device:
+
+| Device | Path | What you get |
+| --- | --- | --- |
+| Android Chrome | WebXR `immersive-ar` + `dom-overlay` | Tracked AR: the globe floats ~1 m in front of you; move the phone to look around. The normal HUD stays on screen over the camera feed. |
+| iOS Safari (no WebXR) | rear camera behind the transparent canvas | Labelled **Camera view**, not AR: the globe floats over your camera but isn't tracked. |
+
+In either mode the HUD collapses to the essentials — an **Exit AR** bar (plus **Recenter** on tracked
+devices), crumbs, captions, the voice orb and the ask box; the brand, market chip, session pill and
+account row step aside. Drag anywhere to spin the globe, pinch to zoom (pinch works on every touch screen,
+AR or not). Panels open as bottom sheets and the globe rises above them. Wallet prompts are DOM modals
+a WebXR session would hide, so confirming a trade or signing in leaves AR first and tells you so.
+
+Camera access needs a secure origin (`npm run dev:https` on your LAN, or the deployment). `?ar=1` forces the
+button on for QA; the `localhost` IWER emulator covers the WebXR path headlessly.
+
 ### Deploy
 
 Two services (`frontend`, `backend`) in one Railway project. See **[DEPLOY.md](DEPLOY.md)**.

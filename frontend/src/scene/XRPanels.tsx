@@ -21,6 +21,7 @@ import { sessionPill, startSessionPolling, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { cancelAnnouncement, cancelTrigger, confirmTrade, confirmTrigger, describeIntent, describeRule, feeSummary, isGated, orderStatusLabel, prepareTrade, prepareTrigger, tradeConfirmedAnnouncement } from "@/solana/trade";
 import { recenterXR, xrGlobe } from "./CameraRig";
+import { useHandheld } from "./handheld";
 import { FONT_BODY, FONT_BOLD, FONT_NUM, latinText } from "./fonts";
 import { GlassRect, UNIT_PLANE, type GlassMaterial } from "./glass";
 import { Icon, type IconName } from "./icons";
@@ -676,13 +677,15 @@ function ResultCues() {
 
 export function XRPanels() {
   const mode = useXR((s) => s.mode);
+  /* Phones keep the DOM HUD on screen (dom-overlay), so the in-world panels stay out of the way. */
+  const handheld = useHandheld((s) => s.active === "webxr");
   const focusedCompany = useWorld((s) => s.focusedCompany);
   const focusedCountry = useWorld((s) => s.focusedCountry);
   const pendingTrade = useMarket((s) => s.pendingTrade);
   const pendingOrder = useMarket((s) => s.pendingOrder);
   const loginPrompt = useMarket((s) => s.loginPrompt);
   const depositPrompt = useMarket((s) => s.depositPrompt);
-  if (mode == null) return null;
+  if (mode == null || handheld) return null;
   return (
     <group>
       <group position={CLUSTER_POS} rotation={CLUSTER_ROT}>

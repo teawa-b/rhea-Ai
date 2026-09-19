@@ -92,6 +92,8 @@ export function Globe() {
     const d = drag.current;
     if (!d.on || e.pointerId !== d.id) return;
     const x = e.nativeEvent.clientX ?? 0, y = e.nativeEvent.clientY ?? 0;
+    /* A pinch (gestures.ts) owns the touch: keep tracking the finger, but don't spin. */
+    if (rig.pinching) { d.x = x; d.y = y; return; }
     const dx = x - d.x, dy = y - d.y;
     d.x = x; d.y = y; d.moved += Math.abs(dx) + Math.abs(dy);
     const k = 0.0062 * (rig.dist / DIST.world);
