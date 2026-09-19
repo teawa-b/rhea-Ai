@@ -209,6 +209,111 @@ export type PrivateMarketsOverview = {
   fetchedAt: string;
 };
 
+/* ---------------- Meteora DBC studio ---------------- */
+
+/** A curve shape tuned for one kind of equity. */
+export type DbcPreset = {
+  id: string;
+  name: string;
+  summary: string;
+  /** Curve opens this far below the reference price. */
+  launchDiscountPct: number;
+  /** Half-width of the thick anchor band around the reference price. */
+  bandPct: number;
+  /** Migration price sits this far above the reference. */
+  ceilingPct: number;
+  /** Anchor-segment liquidity relative to the thin segments either side. */
+  anchorWeight: number;
+  startingFeeBps: number;
+  endingFeeBps: number;
+  feeDecayMinutes: number;
+};
+
+export type DbcPlanInput = {
+  baseSymbol: string;
+  baseName?: string;
+  baseDecimals?: number;
+  baseTokenType?: "spl" | "token2022";
+  quoteSymbol?: string;
+  quoteMint?: string;
+  quoteDecimals?: number;
+  /** True when quoting in another tokenized stock rather than a stablecoin. */
+  quoteIsTokenizedStock?: boolean;
+  /** Price the curve is anchored on, in quote units per base token. */
+  referencePriceUsd: number;
+  /** Where that price came from — shown next to every number it produces. */
+  referenceSource: string;
+  referenceAt?: string | null;
+  totalTokenSupply?: number;
+  presetId?: string;
+  launchDiscountPct?: number;
+  bandPct?: number;
+  ceilingPct?: number;
+  anchorWeight?: number;
+  /** Address that receives leftover base tokens. The program requires one; the
+   *  planner will not invent it. */
+  leftoverReceiver?: string;
+};
+
+export type DbcCurveSegment = {
+  name: string;
+  lowerPriceUsd: number;
+  upperPriceUsd: number;
+  /** Quote tokens needed to move price across this segment. */
+  quoteIn: number;
+  /** Base tokens sold across it. */
+  baseOut: number;
+  liquidityWeight: number;
+  /** This segment's share of the total raise, as a %. */
+  sharePct: number;
+};
+
+export type DbcCurvePlan = {
+  base: { symbol: string; name: string; decimals: number; tokenType: string };
+  quote: { symbol: string; mint: string; decimals: number; isTokenizedStock: boolean };
+  preset: DbcPreset;
+  referencePriceUsd: number;
+  referenceSource: string;
+  referenceAt: string | null;
+  startPriceUsd: number;
+  bandLowPriceUsd: number;
+  bandHighPriceUsd: number;
+  migrationPriceUsd: number;
+  launchDiscountPct: number;
+  bandPct: number;
+  ceilingPct: number;
+  anchorWeight: number;
+  totalTokenSupply: number;
+  segments: DbcCurveSegment[];
+  totalQuoteToMigrate: number;
+  totalBaseSold: number;
+  migrationQuoteThreshold: number;
+  fee: { startingFeeBps: number; endingFeeBps: number; decayMinutes: number; dynamicFeeEnabled: boolean };
+  /** Whether the SDK's own validator accepted this config. */
+  valid: boolean;
+  validationError: string | null;
+  warnings: string[];
+  /** Null until the caller names one — the program rejects a launch without it. */
+  leftoverReceiver: string | null;
+  /** The ConfigParameters object, ready for createConfig. */
+  config: unknown;
+};
+
+export type DbcPoolStatus = {
+  poolAddress: string;
+  baseMint: string;
+  config: string;
+  creator: string;
+  migrated: boolean;
+  quoteProgressPct: number | null;
+  baseProgressPct: number | null;
+  quoteReserve: number;
+  migrationQuoteThreshold: number | null;
+  currentPriceUsd: number | null;
+  unclaimedQuoteFee: number | null;
+  fetchedAt: string;
+};
+
 export type ChartRange = "1D" | "5D" | "1M" | "3M" | "1Y" | "5Y" | "MAX";
 
 export type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };

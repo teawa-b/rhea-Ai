@@ -10,13 +10,14 @@ import {
 } from "../shared/registry";
 import type {
   AssetCapability, Briefing, BriefingDistribution, BriefingHolding, ChartRange, Company, CorporateAction, CountrySummary, EligibilityResult,
-  MarketOverview, Portfolio, Position, PrivateMarketSnapshot, PrivateMarketsOverview, TokenizedAsset,
+  DbcPlanInput, MarketOverview, Portfolio, Position, PrivateMarketSnapshot, PrivateMarketsOverview, TokenizedAsset,
 } from "../shared/types";
 import { hasPythKey, history, lastCloseFor, priceSnapshot, sessionInfo } from "./feeds";
 import { JupiterError, executeSwap, getPrices, getSwapQuote, hasJupiterKey, listTokenizedAssets, triggerProxy, type JupPrice } from "./jupiter";
 import {
   TESSERA_DISCLOSURE, impliedValuation, premiumToMark, tesseraProofOfReserve, tesseraTokens,
 } from "./tessera";
+import { DBC_PRESETS, DEFAULT_PRESET, dbcPoolStatus, planEquityCurve } from "./meteora";
 import { corporateActions, proofOfReserves, type XCorporateAction } from "./xstocks";
 
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
@@ -485,6 +486,52 @@ export function marketRouter(): Router {
   r.get("/overview", async (_req, res) => {
     try { res.json(await buildOverview()); }
     catch (e) { bad(res, 502, (e as Error).message); }
+  });
+
+  /* ---- Meteora DBC studio (read-only) ---- *
+   * Plans and inspects bonding curves for tokenized equities. Nothing here
+   * signs or sends: launching is a human action with real money. */
+  r.post("/dbc/plan", async (req: Request, res: Response) => {
+    const b = (req.body ?? {}) as Partial<DbcPlanInput> & { companyId?: string };
+    try {
+      let referencePriceUsd = Number(b.referencePriceUsd);
+      let referenceSource = String(b.referenceSource ?? "");
+      let referenceAt: string | null = b.referenceAt ?? null;
+      let baseSymbol = String(b.baseSymbol ?? "");
+
+      /* Anchoring on a company resolves the reference price from whatever feed
+       * is right for it: an equity price for a listed one, the issuer's mark
+       * for a private one. That is the whole point of the tool. */
+      if (b.companyId) {
+        const co = COMPANY_BY_ID[b.companyId] ?? resolveCompany(b.companyId);
+        if (!co) return bad(res, 404, "Unknown company");
+        const asset = await assetFor(co.id);
+        const price = await priceSnapshot(co, asset);
+        const ref = price.underlyingPriceUsd ?? price.tokenPriceUsd;
+        if (!ref) return bad(res, 502, `No reference price is available for ${co.name} right now.`);
+        referencePriceUsd = ref;
+        referenceSource = price.underlyingSource === "tessera-mark" ? "Tessera issuer mark"
+          : price.underlyingSource === "pyth" ? `Pyth ${co.pythSymbol ?? co.ticker}`
+          : price.underlyingSource === "none" ? "Jupiter onchain price"
+          : price.underlyingSource;
+        referenceAt = price.underlyingUpdatedAt ?? price.tokenUpdatedAt;
+        baseSymbol = baseSymbol || asset?.symbol || co.tokenSymbol;
+        if (!b.presetId && co.private) b.presetId = "pre-ipo";
+      }
+
+      if (!baseSymbol) return bad(res, 400, "A base token symbol is required.");
+      if (!Number.isFinite(referencePriceUsd) || referencePriceUsd <= 0) {
+        return bad(res, 400, "A positive reference price is required to anchor the curve.");
+      }
+      res.json(planEquityCurve({ ...b, baseSymbol, referencePriceUsd, referenceSource: referenceSource || "caller-supplied", referenceAt }));
+    } catch (e) { bad(res, 400, (e as Error).message); }
+  });
+
+  r.get("/dbc/presets", (_req, res) => res.json({ presets: Object.values(DBC_PRESETS), default: DEFAULT_PRESET }));
+
+  r.get("/dbc/pool/:address", async (req: Request, res: Response) => {
+    try { res.json(await dbcPoolStatus(String(req.params.address))); }
+    catch (e) { bad(res, 404, (e as Error).message); }
   });
 
   r.get("/private", async (_req, res) => {
