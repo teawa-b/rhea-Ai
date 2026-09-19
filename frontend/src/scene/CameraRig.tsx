@@ -14,6 +14,7 @@ import { useMarket } from "@/state/market";
 import { REGION_BY_ID } from "@/state/regions";
 import { useWorld } from "@/state/world";
 import { clamp, damp } from "./geo";
+import { gyro } from "./gyro";
 import { useHandheld } from "./handheld";
 import { DIST, endFlight, flyTo, releaseToWorld, rig, stepFlight } from "./rig";
 
@@ -39,15 +40,22 @@ const XR_FOCAL_NEAR = new THREE.Vector3(-0.34, 1.46, -0.9);
 const XR_FOCAL_CHART = new THREE.Vector3(-0.72, 1.16, -1.25);
 const XR_SCALE_NEAR = 0.54;
 const XR_SCALE_CHART = 0.26;
-/* Handheld AR (a phone held at chest height, portrait): no chart cluster in
- * the world, so the globe sits centred, closer and a little smaller. While a
- * DOM panel covers the lower half of the screen the globe rises above it. */
-const HH_FOCAL_WORLD = new THREE.Vector3(0, 1.28, -1.0);
-const HH_FOCAL_NEAR = new THREE.Vector3(0, 1.34, -0.8);
-const HH_FOCAL_PANEL = new THREE.Vector3(0, 1.8, -1.05);
+/* Handheld AR (a phone, WebXR): the globe is a world-locked object — a fixed
+ * centre in the room, never turned toward the user, so ARCore tracking does
+ * the rest and you can walk around it. Zooming scales it in place; while a
+ * DOM panel covers the lower half of the screen it rises above the sheet. */
+const HH_CENTER = new THREE.Vector3(0, 1.22, -1.0);
+const HH_CENTER_PANEL = new THREE.Vector3(0, 1.62, -1.0);
 const HH_BASE_SCALE = 0.28;
 const HH_SCALE_NEAR = 0.4;
 const HH_SCALE_PANEL = 0.19;
+/* Camera view with gyroscope: the globe is anchored on the ray the phone pointed
+ * along when AR started (or when the user re-centred), at this distance. The
+ * render FOV is widened toward a phone camera's so the anchor holds against
+ * the live feed as the phone turns. */
+const GYRO_FOV = 64;
+const DESKTOP_FOV = 38;
+const _anchorDir = new THREE.Vector3(0, 0, -1);
 /* The head pose every layout constant above is authored against. XrHeadAnchor
  * moves that frame onto the user's real head at session start, so the planet
  * lands in front of them whether they stand, sit, or start off-centre. */
@@ -118,6 +126,7 @@ export function CameraRig({ children }: { children: ReactNode }) {
   const xrMode = useXR((s) => s.mode);
   const inXR = xrMode != null;
   const handheld = useHandheld((s) => s.active === "webxr");
+  const gyroView = useHandheld((s) => s.active === "camera" && s.gyro);
   /* Smoothed head direction + chart-shrink blend, kept out of React. */
   const xr = useRef({ dir: new THREE.Vector3(0.3, 0.1, 0.95).normalize(), chartK: 0 });
 
@@ -207,13 +216,14 @@ export function CameraRig({ children }: { children: ReactNode }) {
         : Boolean((w.focusedCompany && w.panelReady) || m.pendingTrade || m.pendingOrder);
       x.chartK = damp(x.chartK, chartShowing ? 1 : 0, 3.2, dt);
       if (handheld) {
-        _focal.lerpVectors(HH_FOCAL_WORLD, HH_FOCAL_NEAR, zoomT).lerp(HH_FOCAL_PANEL, x.chartK);
-      } else {
-        _focal.lerpVectors(XR_FOCAL_WORLD, XR_FOCAL_NEAR, zoomT).lerp(XR_FOCAL_CHART, x.chartK);
+        const s = THREE.MathUtils.lerp(THREE.MathUtils.lerp(HH_BASE_SCALE, HH_SCALE_NEAR, zoomT), HH_SCALE_PANEL, x.chartK);
+        g.scale.setScalar(s);
+        g.position.lerpVectors(HH_CENTER, HH_CENTER_PANEL, x.chartK);
+        xrGlobe.pos.copy(g.position); xrGlobe.scale = s; xrGlobe.chartK = x.chartK;
+        return;
       }
-      const s = handheld
-        ? THREE.MathUtils.lerp(THREE.MathUtils.lerp(HH_BASE_SCALE, HH_SCALE_NEAR, zoomT), HH_SCALE_PANEL, x.chartK)
-        : THREE.MathUtils.lerp(THREE.MathUtils.lerp(XR_BASE_SCALE, XR_SCALE_NEAR, zoomT), XR_SCALE_CHART, x.chartK);
+      _focal.lerpVectors(XR_FOCAL_WORLD, XR_FOCAL_NEAR, zoomT).lerp(XR_FOCAL_CHART, x.chartK);
+      const s = THREE.MathUtils.lerp(THREE.MathUtils.lerp(XR_BASE_SCALE, XR_SCALE_NEAR, zoomT), XR_SCALE_CHART, x.chartK);
 
       /* The headset camera is the head: turn the focused spot toward it. */
       camera.getWorldPosition(_head);
@@ -234,11 +244,26 @@ export function CameraRig({ children }: { children: ReactNode }) {
       g.position.copy(_focal).addScaledVector(x.dir, -sEarth);
       g.position.x -= 0.55 * away; g.position.y -= 0.12 * away; g.position.z -= 0.35 * away;
       xrGlobe.pos.copy(g.position); xrGlobe.scale = sEarth; xrGlobe.chartK = x.chartK;
+    } else if (gyroView && gyro.active) {
+      /* Phone camera view: the sensor turns the camera; the globe holds a fixed spot in the room. */
+      const cam = camera as THREE.PerspectiveCamera;
+      if (cam.fov !== GYRO_FOV) { cam.fov = GYRO_FOV; cam.updateProjectionMatrix(); }
+      cam.position.set(0, 0, 0);
+      cam.quaternion.copy(gyro.q);
+      if (gyro.recalibrate) { _anchorDir.set(0, 0, -1).applyQuaternion(gyro.q).normalize(); gyro.recalibrate = false; }
+      const aspect = cam.aspect || 1;
+      const fit = Math.max(1, 1.05 / aspect);
+      /* Same on-screen size as the flat view despite the wider FOV. */
+      const d = rig.dist * fit * (Math.tan((DESKTOP_FOV / 2) * Math.PI / 180) / Math.tan((GYRO_FOV / 2) * Math.PI / 180));
+      g.scale.setScalar(1);
+      g.position.copy(_anchorDir).multiplyScalar(d);
     } else {
+      const cam = camera as THREE.PerspectiveCamera;
+      if (cam.fov !== DESKTOP_FOV) { cam.fov = DESKTOP_FOV; cam.updateProjectionMatrix(); }
       g.scale.setScalar(1);
       g.position.set(0, 0, 0);
       /* Portrait viewports would crop the planet horizontally: back off. */
-      const aspect = (camera as THREE.PerspectiveCamera).aspect || 1;
+      const aspect = cam.aspect || 1;
       const fit = Math.max(1, 1.05 / aspect);
       const d = rig.dist * fit;
       /* Panel offset shrinks on narrow viewports where the panel overlays instead. */

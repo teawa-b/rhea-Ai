@@ -5,8 +5,10 @@
  *            tracking, camera passthrough) with the DOM HUD kept on screen
  *            through the `dom-overlay` feature. Move the phone to look around.
  *   "camera" iOS Safari and anything else without WebXR: the rear camera is
- *            shown behind the transparent canvas. Not tracked, so the UI calls
- *            it a camera view, never "AR". Drag / pinch still drive the globe.
+ *            shown behind the transparent canvas and the gyroscope drives the
+ *            camera, so the globe is anchored to a direction in the room
+ *            (rotation-tracked only). Without a usable sensor it degrades to
+ *            a plain camera view and the UI says so.
  *
  * The headset never comes through here (HudGate hides the DOM HUD and XRPanels
  * takes over there); `active === "webxr"` is what tells the scene a WebXR
@@ -14,6 +16,8 @@
 import { create } from "zustand";
 import { track } from "@/analytics";
 import { useVoice } from "@/ai/voice";
+import { gyro, startGyro, stopGyro } from "./gyro";
+import { recenterXR } from "./CameraRig";
 import { xrStore } from "./xrStore";
 
 export { arOverlayRoot } from "./xrStore";
@@ -28,9 +32,11 @@ type HandheldState = {
   /** While entering (the WebXR prompt or the camera permission is up). */
   entering: boolean;
   stream: MediaStream | null;
+  /** Camera path only: whether the gyroscope is anchoring the globe. */
+  gyro: boolean;
 };
 
-export const useHandheld = create<HandheldState>(() => ({ support: undefined, active: null, entering: false, stream: null }));
+export const useHandheld = create<HandheldState>(() => ({ support: undefined, active: null, entering: false, stream: null, gyro: false }));
 
 /** Phones and tablets only: a coarse primary pointer plus touch. Never the Quest browser (it has its own launcher);
  * `?ar=1` forces the button on for QA (pairs with the localhost IWER emulator for the WebXR path). */
@@ -79,15 +85,20 @@ export async function enterHandheld(): Promise<boolean> {
       notice("Move your phone to look around. Drag to spin the globe, pinch to zoom.");
       return true;
     }
+    /* Sensor permission first (it needs the tap's activation), then the camera. */
+    const tracked = await startGyro();
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-    useHandheld.setState({ active: "camera", stream });
-    track("webxr_entered", "handheld-camera");
-    notice("Camera view: the globe floats over your camera. Drag to spin, pinch to zoom.");
+    useHandheld.setState({ active: "camera", stream, gyro: tracked });
+    track("webxr_entered", tracked ? "handheld-gyro" : "handheld-camera");
+    notice(tracked
+      ? "The globe is anchored where you're pointing. Turn to look around; tap the target to re-place it."
+      : "Camera view: no motion sensor here, so the globe follows the phone. Drag to spin, pinch to zoom.");
     return true;
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e);
     console.warn("[ar] enter failed", e);
-    useHandheld.setState({ active: null, stream: null });
+    stopGyro();
+    useHandheld.setState({ active: null, stream: null, gyro: false });
     notice(/denied|permission|NotAllowed/i.test(msg) ? "Camera access was blocked. Allow it in the site settings to use AR." : `Couldn't start AR: ${msg}`);
     return false;
   } finally {
@@ -104,7 +115,15 @@ export function exitHandheld() {
     return;
   }
   stream?.getTracks().forEach((t) => t.stop());
-  useHandheld.setState({ active: null, stream: null });
+  stopGyro();
+  useHandheld.setState({ active: null, stream: null, gyro: false });
+}
+
+/** Puts the globe back in front of the phone: re-seats the WebXR anchor, or re-aims the gyro anchor. */
+export function recenterHandheld() {
+  const { active } = useHandheld.getState();
+  if (active === "webxr") recenterXR();
+  else if (active === "camera") gyro.recalibrate = true;
 }
 
 /** Leaves a WebXR handheld session before something that opens a DOM modal outside the overlay (Privy's

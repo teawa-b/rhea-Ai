@@ -5,8 +5,7 @@ import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
 import { VERIFIED_ON_MAINNET } from "@/demo/verified";
-import { recenterXR } from "@/scene/CameraRig";
-import { enterHandheld, exitHandheld, useHandheld } from "@/scene/handheld";
+import { enterHandheld, exitHandheld, recenterHandheld, useHandheld } from "@/scene/handheld";
 import { DEMO_WALLET, sessionPill, startSessionPolling, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { fmtEt, fmtPct, fmtUsd, solscanTx } from "@/theme";
@@ -148,6 +147,8 @@ export function Hud() {
   const ar = useHandheld((s) => s.active);
   const arSupport = useHandheld((s) => s.support);
   const arEntering = useHandheld((s) => s.entering);
+  const arGyro = useHandheld((s) => s.gyro);
+  const arTracked = ar === "webxr" || (ar === "camera" && arGyro);
   const [xrMode, setXrMode] = useState<"immersive-ar" | "immersive-vr" | null>(null);
   const capRef = useRef<HTMLDivElement>(null);
 
@@ -208,10 +209,10 @@ export function Hud() {
         /* AR: the brand, market chip and account row step aside; one slim bar with the way out (and recenter on tracked devices). */
         <div className="arbar">
           <button className="btn sm ar-exit" onClick={exitHandheld} title="Back to the flat view"><ChevronLeftIcon size={14} />Exit AR</button>
-          <span className="chip dim ar-mode" title={ar === "webxr" ? "Tracked AR: move your phone to look around" : "Camera view: not tracked, drag to spin"}>
-            <i className={`dot ${ar === "webxr" ? "on" : "warn"}`} />{ar === "webxr" ? "AR" : "Camera view"}
+          <span className="chip dim ar-mode" title={ar === "webxr" ? "Tracked AR: the globe is fixed in your room; walk around it" : arGyro ? "Anchored by the motion sensor: turn to look around (position isn't tracked without WebXR)" : "Camera view: no motion sensor, the globe follows the phone"}>
+            <i className={`dot ${arTracked ? "on" : "warn"}`} />{ar === "webxr" ? "AR" : arGyro ? "AR · gyro" : "Camera view"}
           </span>
-          {ar === "webxr" ? <button className="btn ghost sm" onClick={() => { resetGlobe(false); recenterXR(); }} title="Bring the globe back in front of you" aria-label="Recenter"><RecenterIcon size={15} /></button> : null}
+          {arTracked ? <button className="btn ghost sm" onClick={() => { resetGlobe(false); recenterHandheld(); }} title="Re-place the globe in front of you" aria-label="Recenter"><RecenterIcon size={15} /></button> : null}
         </div>
       ) : (
       <div className="topbar">

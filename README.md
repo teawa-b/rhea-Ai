@@ -101,11 +101,11 @@ Quest browser). What it does depends on the device:
 
 | Device | Path | What you get |
 | --- | --- | --- |
-| Android Chrome | WebXR `immersive-ar` + `dom-overlay` | Tracked AR: the globe floats ~1 m in front of you; move the phone to look around. The normal HUD stays on screen over the camera feed. |
-| iOS Safari (no WebXR) | rear camera behind the transparent canvas | Labelled **Camera view**, not AR: the globe floats over your camera but isn't tracked. |
+| Android Chrome | WebXR `immersive-ar` + `dom-overlay` | Full AR: the globe is a world-locked object ~1 m in front of where you started; walk around it, ARCore tracks position and rotation. The normal HUD stays on screen over the camera feed. |
+| iOS Safari (no WebXR) | rear camera behind the transparent canvas + gyroscope | Labelled **AR · gyro**: the globe is anchored to the direction you pointed at when you entered and stays there as you turn (rotation tracked; walking isn't, Safari has no WebXR). Without a motion sensor it degrades to a plain **Camera view** and says so. |
 
-In either mode the HUD collapses to the essentials — an **Exit AR** bar (plus **Recenter** on tracked
-devices), crumbs, captions, the voice orb and the ask box; the brand, market chip, session pill and
+In either mode the HUD collapses to the essentials — an **Exit AR** bar (plus **Recenter**, which re-places
+the globe in front of you), crumbs, captions, the voice orb and the ask box; the brand, market chip, session pill and
 account row step aside. Drag anywhere to spin the globe, pinch to zoom (pinch works on every touch screen,
 AR or not). Panels open as bottom sheets and the globe rises above them. Wallet prompts are DOM modals
 a WebXR session would hide, so confirming a trade or signing in leaves AR first and tells you so.
