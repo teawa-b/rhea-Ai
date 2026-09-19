@@ -42,6 +42,9 @@ type Flight = {
   yaw1: number; pitch1: number; distMid: number; dist1: number; offMid: number; off1: number;
   rotateS: number; zoomS: number; t: number;
   onArrive?: () => void;
+  /** Fire onArrive as soon as the place faces the user (the zoom still running)
+   * instead of at the end: in a headset the panel then rises with the zoom. */
+  early: boolean; fired: boolean;
 };
 let flight: Flight | null = null;
 
@@ -50,7 +53,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Starts a flight and returns its duration in seconds. */
-export function flyTo(lat: number, lng: number, dist: number, offsetX: number, onArrive?: () => void): number {
+export function flyTo(lat: number, lng: number, dist: number, offsetX: number, onArrive?: () => void, revealWhenFacing = false): number {
   const f = facingRotation(lat, lng);
   const yaw1 = nearestAngle(f.yaw, rig.yaw);
   const pitch1 = clamp(f.pitch, -1.2, 1.2);
@@ -62,7 +65,7 @@ export function flyTo(lat: number, lng: number, dist: number, offsetX: number, o
   const distMid = long ? Math.max(rig.dist, Math.min(DIST.world, dist + angle * 1.1)) : rig.dist;
   const offMid = long ? 0 : rig.offsetX;
   const zoomS = Math.abs(distMid - dist) < 0.02 && Math.abs(offMid - offsetX) < 0.02 ? 0 : clamp(0.5 + Math.abs(distMid - dist) * 0.3, 0.55, 1.0) * speed;
-  flight = { yaw0: rig.yaw, pitch0: rig.pitch, dist0: rig.dist, off0: rig.offsetX, yaw1, pitch1, distMid, dist1: dist, offMid, off1: offsetX, rotateS, zoomS, t: 0, onArrive };
+  flight = { yaw0: rig.yaw, pitch0: rig.pitch, dist0: rig.dist, off0: rig.offsetX, yaw1, pitch1, distMid, dist1: dist, offMid, off1: offsetX, rotateS, zoomS, t: 0, onArrive, early: revealWhenFacing, fired: false };
   rig.targetYaw = yaw1; rig.targetPitch = pitch1; rig.targetDist = dist; rig.targetOffsetX = offsetX;
   rig.tweening = false; rig.autoRotate = false; rig.vy = 0; rig.vp = 0;
   return rotateS + zoomS;
@@ -80,6 +83,7 @@ export function stepFlight(dt: number): boolean {
   rig.pitch = lerp(fl.pitch0, fl.pitch1, er);
   rig.dist = z > 0 ? lerp(fl.distMid, fl.dist1, ez) : lerp(fl.dist0, fl.distMid, er);
   rig.offsetX = z > 0 ? lerp(fl.offMid, fl.off1, ez) : lerp(fl.off0, fl.offMid, er);
+  if (fl.early && !fl.fired && r >= 1) { fl.fired = true; fl.onArrive?.(); }
   if (r >= 1 && z >= 1) endFlight();
   return true;
 }
@@ -90,7 +94,7 @@ export function endFlight() {
   if (!fl) return;
   flight = null;
   rig.targetYaw = rig.yaw; rig.targetPitch = rig.pitch;
-  fl.onArrive?.();
+  if (!fl.fired) { fl.fired = true; fl.onArrive?.(); }
 }
 
 export function faceLatLng(lat: number, lng: number, dist?: number) {

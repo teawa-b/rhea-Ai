@@ -226,6 +226,7 @@ function CompanyHolo({ companyId }: { companyId: string }) {
 
   return (
     <group>
+      <Card w={W + 0.12} h={1.1} y={-0.06} accent={C.cyan} fill={0.5} />
       {/* Header above the chart */}
       <Label position={[-W / 2, 0.42, 0]} text={co.name.toUpperCase()} size={0.056} color="#ffffff" />
       <Label position={[-W / 2, 0.36, 0]} text={`${co.ticker} · ${co.tokenSymbol} · ${co.sector} · ${COUNTRIES[co.countryCode].name}`} size={0.022} color="#b8c7da" />
@@ -260,11 +261,40 @@ function CompanyHolo({ companyId }: { companyId: string }) {
 
 /** Frosted card for confirmations (kept translucent, not opaque): fill, rim and top accent strip in one draw.
  * Hittable, so controller rays stop on the card instead of reaching the globe behind it. */
-function Card({ w, h, accent }: { w: number; h: number; accent: string }) {
+function Card({ w, h, accent, y = 0, fill = 0.72 }: { w: number; h: number; accent: string; y?: number; /** lighter for browse panels, so the room shows through */ fill?: number }) {
   return (
-    <GlassRect position={[0, 0, -0.002]} w={w} h={h} r={0.024} top="#0b0f1c" accent={accent} interactive
-      fill={0.72} rim={0.9} stroke={0.0025} topBar={1} glow={0} sheen={0} bar={0} />
+    <GlassRect position={[0, y, -0.002]} w={w} h={h} r={0.028} top="#0d1224" bottom="#080b16" accent={accent} interactive
+      fill={fill} rim={0.7} stroke={0.0025} topBar={1} glow={0.35} pad={0.05} sheen={0.12} bar={0} />
   );
+}
+
+/** Rises and fades in over ~0.45 s when its key changes, so a cluster arrives with the globe instead of popping. */
+function Rise({ id, children }: { id: string; children: ReactNode }) {
+  const g = useRef<THREE.Group>(null);
+  const t = useRef(0);
+  const done = useRef(false);
+  useEffect(() => { t.current = 0; done.current = false; }, [id]);
+  useFrame((_, dt) => {
+    const grp = g.current;
+    if (!grp) return;
+    t.current = Math.min(1, t.current + dt / 0.45);
+    const k = 1 - Math.pow(1 - t.current, 3);
+    grp.position.y = (1 - k) * -0.06;
+    grp.position.z = (1 - k) * -0.08;
+    grp.scale.setScalar(0.96 + 0.04 * k);
+    if (done.current) return;
+    if (t.current >= 1) done.current = true;
+    grp.traverse((o) => {
+      /* troika Text keeps its opacities on the mesh; glass on a uniform; chart / icon planes on the material. */
+      const tx = o as unknown as { fillOpacity?: number; outlineOpacity?: number };
+      if (typeof tx.fillOpacity === "number") { tx.fillOpacity = k; tx.outlineOpacity = 0.9 * k; return; }
+      const m = (o as THREE.Mesh).material as (THREE.Material & { uniforms?: { uOpacity?: { value: number } } }) | undefined;
+      if (!m) return;
+      if (m.uniforms?.uOpacity) m.uniforms.uOpacity.value = k;
+      else if (m.transparent && m.visible) m.opacity = k;
+    });
+  });
+  return <group ref={g}>{children}</group>;
 }
 
 function Row({ y, label, value, color = "#ffffff", w = 0.76 }: { y: number; label: string; value: string; color?: string; w?: number }) {
@@ -406,8 +436,11 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
   const headlines = news && (news.target === cd.name || news.items.some((n) => n.countryCodes.includes(code))) ? news.items.slice(0, 3) : [];
   const top = 0.05 + ids.length * 0.025 + headlines.length * 0.024;
   const listEnd = top - 0.03 - ids.length * 0.052;
+  const pillY = listEnd - (headlines.length ? 0.09 + headlines.length * 0.042 : 0.03);
+  const cardTop = top + 0.14, cardBottom = pillY - 0.06;
   return (
     <group>
+      <Card w={0.92} h={cardTop - cardBottom} y={(cardTop + cardBottom) / 2} accent={C.cyan} fill={0.5} />
       <Label position={[-0.4, top + 0.09, 0]} text={cd.name.toUpperCase()} size={0.046} color="#ffffff" />
       <Label position={[-0.4, top + 0.04, 0]} text={`${cs?.assetCount ?? 0} tokenized assets · ${cs?.tradableCount ?? 0} live · say a company name or point at it`} size={0.022} color="#b8c7da" />
       {ids.map((id, i) => {
@@ -421,7 +454,7 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
       })}
       {headlines.length ? <Label position={[-0.4, listEnd - 0.01, 0]} text={`NEWS · ${cd.name.toUpperCase()}`} size={0.02} color={C.frost} /> : null}
       {headlines.map((n, i) => <Label key={n.id} position={[-0.4, listEnd - 0.05 - i * 0.042, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 62)} size={0.021} color="#c7d7ea" maxWidth={0.8} />)}
-      <Pill position={[0, listEnd - (headlines.length ? 0.09 + headlines.length * 0.042 : 0.03), 0.01]} w={0.22} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
+      <Pill position={[0, pillY, 0.01]} w={0.22} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
     </group>
   );
 }
@@ -504,7 +537,9 @@ function useAboveGlobe(ref: RefObject<THREE.Group | null>) {
     if (!g) return;
     const { pos, scale } = xrGlobe;
     const y = pos.y + scale + CAPTION_GAP;
-    g.position.set(pos.x + 0.06, Math.min(y, CAPTION_MAX_Y), pos.z + scale * (y > CAPTION_MAX_Y ? 1.05 : 0.35));
+    if (y <= CAPTION_MAX_Y) g.position.set(pos.x + 0.06, y, pos.z + scale * 0.35);
+    /* Too tall to stack on: slide in front of and up-left of the planet, clear of the country labels on its crown. */
+    else g.position.set(pos.x - scale * 0.55, CAPTION_MAX_Y, pos.z + scale * 1.05);
   });
 }
 
@@ -521,13 +556,19 @@ function Captions() {
     : state === "speaking" ? "SPEAKING · HOLD  A  TO INTERRUPT"
     : state === "thinking" ? "THINKING…"
     : "HOLD  A  TO SPEAK";
+  /* Backing chip sized from the laid-out text block, so it hugs one line or five. */
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
+  const onSync = (m: { textRenderInfo?: { blockBounds: number[] } }) => { const b = m.textRenderInfo?.blockBounds; if (b) setBox({ w: b[2] - b[0], h: b[3] - b[1] }); };
   return (
     <group ref={ref}>
       {/* Status line hugs the globe; captions stack upward from it (bottom-anchored so wrapping grows up). */}
       {last.length ? (
-        <Text font={FONT_BODY} position={[0, 0.03, 0]} fontSize={0.026} color="#e8f4ff" anchorX="center" anchorY="bottom" maxWidth={1.1} textAlign="center" lineHeight={1.35} {...OUTLINE}>
-          {last.map((c) => `${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-200)}`).join("\n")}
-        </Text>
+        <group>
+          {box ? <GlassRect position={[0, 0.03 + box.h / 2, -0.003]} w={box.w + 0.08} h={box.h + 0.05} r={0.024} top="#0d1224" bottom="#080b16" accent={C.cyan} fill={0.55} rim={0.45} stroke={0.002} topBar={0} glow={0.2} pad={0.03} sheen={0} bar={0} /> : null}
+          <Text font={FONT_BODY} position={[0, 0.03, 0]} fontSize={0.025} color="#e8f4ff" anchorX="center" anchorY="bottom" maxWidth={1.0} textAlign="center" lineHeight={1.35} onSync={onSync} {...OUTLINE}>
+            {last.map((c) => `${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-160)}`).join("\n")}
+          </Text>
+        </group>
       ) : null}
       <Text font={FONT_BOLD} position={[0, 0, 0]} fontSize={0.02} color={holding ? C.violet : state === "speaking" ? C.solGreen : state === "thinking" ? C.amber : "#b8c7da"} anchorX="center" anchorY="middle" letterSpacing={0.2} {...OUTLINE}>
         {status}
@@ -645,6 +686,7 @@ function IdleHint() {
   const pill = session ? sessionPill(session) : null;
   return (
     <group>
+      <Card w={0.96} h={0.28} y={-0.02} accent={C.sol} fill={0.45} />
       <Label position={[0, 0.06, 0]} text="RHEA" size={0.05} color="#ffffff" anchorX="center" />
       <Label position={[0, 0.005, 0]} text={overview ? `${overview.assets.length} tokenized stocks · ${overview.countries.length} countries · live on Solana` : "loading market…"} size={0.022} color="#b8c7da" anchorX="center" />
       {pill ? <Label position={[0, -0.095, 0]} text={pill.long} size={0.021} color={pill.open ? C.solGreen : C.gold} anchorX="center" /> : null}
@@ -689,7 +731,9 @@ export function XRPanels() {
   return (
     <group>
       <group position={CLUSTER_POS} rotation={CLUSTER_ROT}>
-        {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : depositPrompt ? <DepositHolo /> : loginPrompt ? <LoginHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
+        <Rise id={pendingTrade ? `trade:${pendingTrade.id}` : pendingOrder ? `order:${pendingOrder.id}` : depositPrompt ? "deposit" : loginPrompt ? "login" : focusedCompany ? `co:${focusedCompany}` : focusedCountry ? `cc:${focusedCountry}` : "idle"}>
+          {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : depositPrompt ? <DepositHolo /> : loginPrompt ? <LoginHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
+        </Rise>
       </group>
       <Captions />
       <VoiceOrb />

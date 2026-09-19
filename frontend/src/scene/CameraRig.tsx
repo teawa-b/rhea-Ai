@@ -139,8 +139,10 @@ export function CameraRig({ children }: { children: ReactNode }) {
   const comparison = useWorld((s) => s.comparison);
 
   /* World-state → rig targets (the AI "moves the globe" through here).
-   * Focusing flies there first and only then reveals the side panel (the
-   * world store has a fallback timer if frames never run). */
+   * Desktop: fly there first, then reveal the side panel (the world store has
+   * a fallback timer if frames never run). Headset: reveal as soon as the
+   * place faces the user, so the panel rises while the zoom and the globe's
+   * tuck-aside (chartK below) are still in motion — one movement, not three. */
   useEffect(() => {
     const target = view === "company" && focusedCompany
       ? { place: COMPANY_BY_ID[focusedCompany].headquarters ?? COUNTRIES[COMPANY_BY_ID[focusedCompany].countryCode], dist: DIST.company, offset: -0.62 }
@@ -151,7 +153,7 @@ export function CameraRig({ children }: { children: ReactNode }) {
           : null;
     if (target) {
       let stale = false;
-      flyTo(target.place.lat, target.place.lng, target.dist, target.offset, () => { if (!stale) useWorld.getState().revealPanel(); });
+      flyTo(target.place.lat, target.place.lng, target.dist, target.offset, () => { if (!stale) useWorld.getState().revealPanel(); }, inXR && !handheld);
       return () => { stale = true; };
     }
     if (comparison) {
@@ -161,7 +163,7 @@ export function CameraRig({ children }: { children: ReactNode }) {
     } else {
       releaseToWorld();
     }
-  }, [view, focusedRegion, focusedCountry, focusedCompany, comparison]);
+  }, [view, focusedRegion, focusedCountry, focusedCompany, comparison, inXR, handheld]);
 
   useFrame((_, rawDt) => {
     const dt = Math.min(0.05, rawDt);
@@ -212,11 +214,12 @@ export function CameraRig({ children }: { children: ReactNode }) {
       const zoomT = easeInOut(clamp((DIST.world - rig.dist) / (DIST.world - DIST.country), 0, 1));
       /* Shrink while the cluster shows a chart or a confirmation card. */
       const w = useWorld.getState(), m = useMarket.getState();
-      /* On a phone any DOM panel (place, compare, research, gates) is a bottom sheet, so all of them count. */
+      /* On a phone any DOM panel (place, compare, research, gates) is a bottom sheet, so all of them count.
+       * Headset: keyed on the focus itself, not panelReady, so the tuck-aside starts with the flight. */
       const chartShowing = handheld
         ? Boolean((w.panelReady && (w.focusedCompany || w.focusedCountry || w.focusedRegion)) || w.comparison || w.news || w.impact || m.pendingTrade || m.pendingOrder || m.loginPrompt || m.depositPrompt)
-        : Boolean((w.focusedCompany && w.panelReady) || m.pendingTrade || m.pendingOrder);
-      x.chartK = damp(x.chartK, chartShowing ? 1 : 0, 3.2, dt);
+        : Boolean(w.focusedCompany || m.pendingTrade || m.pendingOrder);
+      x.chartK = damp(x.chartK, chartShowing ? 1 : 0, 4.2, dt);
       if (handheld) {
         const s = THREE.MathUtils.lerp(THREE.MathUtils.lerp(HH_BASE_SCALE, HH_SCALE_NEAR, zoomT), HH_SCALE_PANEL, x.chartK);
         g.scale.setScalar(s);
