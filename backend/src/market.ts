@@ -4,7 +4,7 @@ import express from "express";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
   COMPANIES, COMPANY_BY_ID, COMPANY_BY_TOKEN, COUNTRIES, MIN_TRADE_LIQUIDITY_USD,
-  TESSERA_DISCLOSURE_URL, TESSERA_ISSUER, TESSERA_MIN_TRADE_USD, TESSERA_RESTRICTED_JURISDICTIONS, TESSERA_TERMS_URL,
+  PRESTOCKS_DISCLOSURE_URL, PRESTOCKS_ISSUER, PRESTOCKS_MIN_TRADE_USD, PRESTOCKS_RESTRICTED_JURISDICTIONS, PRESTOCKS_TERMS_URL,
   TRIGGER_MIN_ORDER_USD, USDC_MINT,
   XSTOCKS_DISCLOSURE_URL, XSTOCKS_MIN_TRADE_USD, XSTOCKS_RESTRICTED_JURISDICTIONS, resolveCompany,
 } from "../shared/registry";
@@ -14,9 +14,7 @@ import type {
 } from "../shared/types";
 import { hasPythKey, history, lastCloseFor, priceSnapshot, sessionInfo } from "./feeds";
 import { JupiterError, executeSwap, getPrices, getSwapQuote, hasJupiterKey, listTokenizedAssets, triggerProxy, type JupPrice } from "./jupiter";
-import {
-  TESSERA_DISCLOSURE, impliedValuation, premiumToMark, tesseraProofOfReserve, tesseraTokens,
-} from "./tessera";
+import { PRESTOCKS_DISCLOSURE, impliedValuation, preStocksCatalog, premiumToMark } from "./prestocks";
 import { DBC_PRESETS, DEFAULT_PRESET, dbcPoolStatus, planEquityCurve } from "./meteora";
 import { corporateActions, proofOfReserves, type XCorporateAction } from "./xstocks";
 
@@ -99,15 +97,9 @@ export async function buildOverview(): Promise<MarketOverview> {
  * gap between the two — plus where the backing is attested.
  */
 
-/** Tessera's display symbol for a wrapper ("tSpaceX" -> "T-SpaceX"). */
-function tesseraSymbolFor(asset: TokenizedAsset): string {
-  const code = asset.symbol;
-  return /^t[A-Z]/.test(code) ? `T-${code.slice(1)}` : code;
-}
-
 export async function buildPrivateMarkets(): Promise<PrivateMarketsOverview> {
-  const [assets, marks] = await Promise.all([listTokenizedAssets(), tesseraTokens()]);
-  const tTokens = assets.filter((a) => a.issuerKey === "tessera");
+  const [assets, marks] = await Promise.all([listTokenizedAssets(), preStocksCatalog()]);
+  const tTokens = assets.filter((a) => a.issuerKey === "prestocks");
 
   const out: PrivateMarketSnapshot[] = [];
   for (const a of tTokens) {
@@ -118,26 +110,25 @@ export async function buildPrivateMarkets(): Promise<PrivateMarketsOverview> {
     const p = prices[a.mint];
     const tokenPrice = p?.usdPrice ?? null;
     const premium = premiumToMark(tokenPrice, mark?.markPriceUsd);
-    const display = mark?.symbol ?? tesseraSymbolFor(a);
+    const display = mark?.symbol ?? a.symbol;
     out.push({
       companyId: co.id,
       companyName: co.name,
       mint: a.mint,
       symbol: display,
-      issuer: TESSERA_ISSUER,
-      sector: mark?.sector ?? co.sector,
+      issuer: PRESTOCKS_ISSUER,
+      sector: co.sector,
       tokenPriceUsd: tokenPrice,
       markPriceUsd: mark?.markPriceUsd ?? null,
       markValuationUsd: mark?.markValuationUsd ?? null,
       impliedValuationUsd: impliedValuation(tokenPrice, mark),
       premiumToMarkPct: premium == null ? null : Math.round(premium * 100) / 100,
-      /* Holder counts: the issuer's own figure first, Jupiter's as a fallback. */
-      holders: mark?.holders ?? a.holderCount ?? null,
+      /* PreStocks publishes no holder count; Jupiter's is the only source. */
+      holders: a.holderCount ?? null,
       liquidityUsd: a.liquidityUsd ?? null,
       change24hPct: p?.priceChange24h ?? null,
       tradable: a.tradable,
       markFetchedAt: mark?.fetchedAt ?? null,
-      attestation: tesseraProofOfReserve(display),
       markUnavailable: mark == null,
     });
   }
@@ -146,11 +137,11 @@ export async function buildPrivateMarkets(): Promise<PrivateMarketsOverview> {
 
   return {
     assets: out,
-    issuer: TESSERA_ISSUER,
-    disclosure: TESSERA_DISCLOSURE,
-    disclosureUrl: TESSERA_DISCLOSURE_URL,
-    termsUrl: TESSERA_TERMS_URL,
-    restrictedJurisdictions: TESSERA_RESTRICTED_JURISDICTIONS,
+    issuer: PRESTOCKS_ISSUER,
+    disclosure: PRESTOCKS_DISCLOSURE,
+    disclosureUrl: PRESTOCKS_DISCLOSURE_URL,
+    termsUrl: PRESTOCKS_TERMS_URL,
+    restrictedJurisdictions: PRESTOCKS_RESTRICTED_JURISDICTIONS,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -158,17 +149,17 @@ export async function buildPrivateMarkets(): Promise<PrivateMarketsOverview> {
 /* ---------------- Trade checks: liquidity floor + minimums ---------------- */
 
 export function capabilityFor(asset: TokenizedAsset): AssetCapability {
-  const tessera = asset.issuerKey === "tessera";
+  const isPreStock = asset.issuerKey === "prestocks";
   return {
     assetId: asset.id,
     issuer: asset.issuer,
     supportedJurisdictions: "all",
-    restrictedJurisdictions: tessera ? TESSERA_RESTRICTED_JURISDICTIONS : XSTOCKS_RESTRICTED_JURISDICTIONS,
+    restrictedJurisdictions: isPreStock ? PRESTOCKS_RESTRICTED_JURISDICTIONS : XSTOCKS_RESTRICTED_JURISDICTIONS,
     requiresKyc: false,
     tradable: asset.tradable,
     transferable: true,
-    minimumTradeUsd: tessera ? TESSERA_MIN_TRADE_USD : XSTOCKS_MIN_TRADE_USD,
-    disclosureUrl: tessera ? TESSERA_DISCLOSURE_URL : XSTOCKS_DISCLOSURE_URL,
+    minimumTradeUsd: isPreStock ? PRESTOCKS_MIN_TRADE_USD : XSTOCKS_MIN_TRADE_USD,
+    disclosureUrl: isPreStock ? PRESTOCKS_DISCLOSURE_URL : XSTOCKS_DISCLOSURE_URL,
   };
 }
 
@@ -179,8 +170,8 @@ export const XSTOCKS_DISCLOSURE =
 
 /** The disclosure that belongs to whoever issued this token. */
 export function disclosureFor(asset: TokenizedAsset | undefined): { disclosure: string; disclosureUrl: string } {
-  return asset?.issuerKey === "tessera"
-    ? { disclosure: TESSERA_DISCLOSURE, disclosureUrl: TESSERA_DISCLOSURE_URL }
+  return asset?.issuerKey === "prestocks"
+    ? { disclosure: PRESTOCKS_DISCLOSURE, disclosureUrl: PRESTOCKS_DISCLOSURE_URL }
     : { disclosure: XSTOCKS_DISCLOSURE, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
 }
 
@@ -510,7 +501,7 @@ export function marketRouter(): Router {
         const ref = price.underlyingPriceUsd ?? price.tokenPriceUsd;
         if (!ref) return bad(res, 502, `No reference price is available for ${co.name} right now.`);
         referencePriceUsd = ref;
-        referenceSource = price.underlyingSource === "tessera-mark" ? "Tessera issuer mark"
+        referenceSource = price.underlyingSource === "issuer-mark" ? "PreStocks issuer mark"
           : price.underlyingSource === "pyth" ? `Pyth ${co.pythSymbol ?? co.ticker}`
           : price.underlyingSource === "none" ? "Jupiter onchain price"
           : price.underlyingSource;
@@ -548,15 +539,14 @@ export function marketRouter(): Router {
       /* Issuer calls resolve to null on failure, so they never fail the panel. */
       const [price, xca, reserves] = await Promise.all([priceSnapshot(co, asset), corporateActions(co.tokenSymbol), proofOfReserves(co.tokenSymbol)]);
       /* A company can be wrapped by more than one issuer (SpaceX: Backed and
-       * Tessera). Price each separately — they are different instruments with
+       * issuer). Price each separately — they are different instruments with
        * different backing, and their prices routinely diverge. */
       const wrappers = await Promise.all(all.map(async (a) => ({
         asset: a,
         price: a.id === asset?.id ? price : await priceSnapshot(co, a),
         capability: capabilityFor(a),
         ...disclosureFor(a),
-        attestation: a.issuerKey === "tessera" ? tesseraProofOfReserve(tesseraSymbolFor(a)) : null,
-      })));
+        })));
       res.json({
         company: co, asset: asset ?? null, price,
         corporateActions: classifyCorporateActions(co.id, xca, price.rebase),

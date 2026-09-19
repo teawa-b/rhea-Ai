@@ -56,12 +56,12 @@ async function companyProfile(q: string) {
      * the mark as a stock price, quote a session, or call a T-Token a share. */
     privateCompany: co.private
       ? {
-          note: "Not listed on any exchange. The reference is the issuer's mark on the portfolio behind the token, not a market price, and there is no trading session — the Solana market runs continuously.",
+          note: "Not listed on any exchange. The reference is the issuer's mark on the exposure behind the token, not a market price, and there is no trading session — the Solana market runs continuously.",
           markPriceUsd: p.markPriceUsd ?? null,
           premiumToMarkPct: p.premiumToMarkPct ?? null,
           impliedValuationUsd: p.impliedValuationUsd ?? null,
-          instrument: d.asset?.issuerKey === "tessera"
-            ? "A Tessera T-Token: a loan participation right against a Tessera issuer entity. Not equity, not a security — no ownership, no voting, no dividends, no place on the cap table. Tessera's terms exclude the US and China."
+          instrument: d.asset?.issuerKey === "prestocks"
+            ? "A PreStock: an issuer token backed 1:1 by SPV exposure tracking the private company's price. Economic exposure only — no ownership, voting, dividend or information rights — and not affiliated with or endorsed by the company. Not available in the US or to US persons."
             : null,
         }
       : null,
@@ -311,7 +311,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
         return {
           ok: true,
           issuer: pm.issuer,
-          instrument: "T-Tokens are loan participation rights against a Tessera issuer entity — not shares, not securities. No ownership, voting or dividends.",
+          instrument: "PreStocks are issuer tokens backed 1:1 by SPV exposure tracking a private company's price. Economic exposure only — no ownership, voting or dividends — and not endorsed by the company.",
           restrictedJurisdictions: pm.restrictedJurisdictions,
           companies: pm.assets.map((a) => ({
             company: a.companyName, symbol: a.symbol, sector: a.sector,
@@ -321,7 +321,7 @@ export function createToolRunner(getAuth: () => RheaAuth) {
             holders: a.holders, liquidityUsd: a.liquidityUsd, tradable: a.tradable,
             markUnavailable: a.markUnavailable,
           })),
-          note: "premiumToMarkPct is the onchain price against the issuer's own mark. A positive number means the market is paying above what Tessera marks the exposure at.",
+          note: "premiumToMarkPct is the onchain price against the issuer's own mark. A positive number means the market is paying above what PreStocks marks the exposure at; a negative one means below.",
         };
       }
       case "design_bonding_curve": {

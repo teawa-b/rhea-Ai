@@ -80,7 +80,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const reserves = detail?.reserves ?? null;
   /* A private company has no exchange behind it: the reference is the issuer's
    * mark, there is no session and no 4pm close to gap against. */
-  const isPrivate = Boolean(co?.private) || p?.underlyingSource === "tessera-mark";
+  const isPrivate = Boolean(co?.private) || p?.underlyingSource === "issuer-mark";
   const premium = p?.premiumToMarkPct ?? null;
   /* Every tokenized wrapper of this company. More than one means two issuers
    * wrap the same exposure and their prices are worth comparing directly. */
@@ -132,7 +132,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         {/* Prices */}
         <div className="row" style={{ alignItems: "baseline", gap: 14 }}>
           <div>
-            <div className="hint">{p?.underlyingSource === "tessera-mark" ? "ISSUER MARK · Tessera" : `UNDERLYING · ${p?.underlyingSource === "pyth" ? "Pyth Pro" : p?.underlyingSource === "jupiter-stockdata" ? "Jupiter · xStocks ref" : p?.underlyingSource === "yahoo" ? "Yahoo (fallback)" : "—"}`}</div>
+            <div className="hint">{p?.underlyingSource === "issuer-mark" ? "ISSUER MARK · PreStocks" : `UNDERLYING · ${p?.underlyingSource === "pyth" ? "Pyth Pro" : p?.underlyingSource === "jupiter-stockdata" ? "Jupiter · xStocks ref" : p?.underlyingSource === "yahoo" ? "Yahoo (fallback)" : "—"}`}</div>
             <div className="big">{fmtUsd(p?.underlyingPriceUsd)}</div>
           </div>
           <div>

@@ -5,9 +5,9 @@
 export type CountryCode =
   | "US" | "CN" | "HK" | "TW" | "GB" | "JP" | "DK" | "NL" | "DE" | "FR" | "CH" | "KR" | "IN" | "CA" | "AU" | "SG" | "IE" | "IT";
 
-/** Who wrapped the company into a Solana token. A company can have more than
- *  one: SpaceX is tokenized by both Backed (xStocks) and Tessera. */
-export type IssuerKey = "xstocks" | "tessera";
+/** Who wrapped the company into a Solana token: Backed's xStocks for listed
+ *  equities, PreStocks for private, pre-IPO companies. */
+export type IssuerKey = "xstocks" | "prestocks";
 
 /** A tokenized wrapper beyond the company's primary one. */
 export type CompanyWrapper = {
@@ -48,7 +48,7 @@ export type Company = {
 
 export type TokenizedAsset = {
   /** `${companyId}:solana` for a company's primary wrapper, suffixed with the
-   *  issuer key for any additional one (`spacex:solana:tessera`). Stable: saved
+   *  issuer key for any additional one (`acme:solana:prestocks`). Stable: saved
    *  orders and cached state key off it. */
   id: string;
   companyId: string;
@@ -80,7 +80,7 @@ export type PriceSnapshot = {
   /** Reference price for the underlying. For a listed company that is the
    *  equity price; for a private one it is the issuer's mark on the portfolio. */
   underlyingPriceUsd: number | null;
-  underlyingSource: "pyth" | "jupiter-stockdata" | "yahoo" | "tessera-mark" | "none";
+  underlyingSource: "pyth" | "jupiter-stockdata" | "yahoo" | "issuer-mark" | "none";
   /** Private companies only: the issuer's published mark per token, and what the
    *  onchain price is paying over (+) or under (-) it. */
   markPriceUsd?: number | null;
@@ -143,32 +143,25 @@ export type ProofOfReserves = {
 
 /* ---------------- Private (pre-IPO) markets ---------------- */
 
-/** A T-Token's issuer mark, straight from Tessera's public API. */
-export type TesseraMark = {
-  id: string;
-  name: string;              // "T-OpenAI"
-  symbol: string;            // "T-OpenAI"
-  code: string;              // onchain ticker as Jupiter shows it, "tOpenAI"
-  sector: string;
+/** One PreStock, straight from the issuer's public catalog. */
+export type PreStockMark = {
+  name: string;              // "OpenAI PreStocks"
+  symbol: string;            // "OPENAI"
   mint: string;
-  /** Issuer's mark per token. The only figure comparable to the onchain price. */
+  /** The issuer's one-paragraph description of the company. */
+  description: string;
+  image?: string;
+  url?: string;
+  /** Issuer's mark per token — the reference price, since the company is private. */
   markPriceUsd: number | null;
   /** What the issuer marks the whole company at. */
   markValuationUsd: number | null;
-  holders: number | null;
+  /** The issuer's own snapshot of the onchain price. */
+  tokenPriceUsd: number | null;
+  /** markValuation scaled by tokenPrice / markPrice, as the issuer publishes it. */
+  impliedValuationUsd: number | null;
+  supply: number | null;
   fetchedAt: string;
-};
-
-/** Where a private-market token's backing is attested, and by whom. Distinct
- *  from ProofOfReserves: Chainlink's T-Token streams publish attested unit
- *  counts on a roughly monthly cadence, so there is no live backed-% to quote. */
-export type ReserveAttestation = {
-  symbol: string;
-  issuer: string;
-  custodian: string;
-  verifier: string;
-  attestationUrl: string;
-  note: string;
 };
 
 /** A private company's live picture: what the issuer marks it at, what the
@@ -182,7 +175,7 @@ export type PrivateMarketSnapshot = {
   sector: string;
   /** Executable onchain price (Jupiter Price v3). */
   tokenPriceUsd: number | null;
-  /** Issuer's mark per token (Tessera). */
+  /** Issuer's mark per token (PreStocks). */
   markPriceUsd: number | null;
   markValuationUsd: number | null;
   /** markValuation scaled by the premium the market is paying. */
@@ -194,7 +187,6 @@ export type PrivateMarketSnapshot = {
   change24hPct: number | null;
   tradable: boolean;
   markFetchedAt: string | null;
-  attestation: ReserveAttestation | null;
   /** True when the issuer API was unreachable and only onchain data is shown. */
   markUnavailable: boolean;
 };

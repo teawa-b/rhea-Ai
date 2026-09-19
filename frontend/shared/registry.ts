@@ -58,12 +58,17 @@ export const ISO_NUMERIC_TO_CODE: Record<string, CountryCode> = {
   "356": "IN", "124": "CA", "036": "AU", "702": "SG", "372": "IE", "380": "IT",
 };
 
-/* Tessera T-Token mints. Seeds only — the live catalog in backend/src/tessera.ts
+/* PreStocks mints. Seeds only — the live catalog in backend/src/prestocks.ts
  * refreshes them, and every price, mark and count is fetched at runtime. */
-export const TESSERA_MINTS = {
-  tOpenAI: "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ",
-  tKalshi: "TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ",
-  tSpaceX: "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v",
+export const PRESTOCKS_MINTS = {
+  ANDURIL: "PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB",
+  ANTHROPIC: "Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw",
+  FIGUREAI: "PreZad18qfPtbxNpMtMuAuX2zVpvkEU8DnJx56faCWd",
+  KALSHI: "PreLWGkkeqG1s4HEfFZSy9moCrJ7btsHuUtfcCeoRua",
+  NEURALINK: "PrekqLJvJ3qVdXmBGDiexvwUTF4rLFDa6HWS4HJbw9S",
+  OPENAI: "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF",
+  POLYMARKET: "Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP",
+  SPACEX: "PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh",
 } as const;
 
 const c = (
@@ -152,17 +157,6 @@ const CURATED: Company[] = [
     { name: "Livingston, New Jersey", lat: 40.7959, lng: -74.3149 }),
   c("applovin", "AppLovin", "APP", "US", "Ad-tech", "APPx",
     { name: "Palo Alto, California", lat: 37.4419, lng: -122.1430 }),
-  /* Two issuers wrap SpaceX: Backed's SPCXx (primary) and Tessera's tSpaceX,
-   * priced side by side in the company panel.
-   *
-   * Not flagged `private` even though the company is: SPCX is quoted, so the
-   * primary wrapper has a real equity reference and a real 4pm close, and
-   * suppressing them would throw away accurate data. The T-Token is still
-   * priced against Tessera's mark, because that branch keys off the asset's
-   * issuer rather than the company. */
-  c("spacex", "SpaceX", "SPCX", "US", "Aerospace", "SPCXx",
-    { name: "Starbase, Texas", lat: 25.9972, lng: -97.1560 },
-    { wrappers: [{ issuerKey: "tessera", tokenSymbol: "tSpaceX", mint: TESSERA_MINTS.tSpaceX }] }),
   c("sp500", "S&P 500 ETF", "SPY", "US", "Index Fund", "SPYx", undefined),
   c("nasdaq100", "Nasdaq-100 ETF", "QQQ", "US", "Index Fund", "QQQx", undefined),
   c("gold", "Gold Trust", "GLD", "US", "Commodity Fund", "GLDx", undefined),
@@ -296,30 +290,57 @@ const CURATED: Company[] = [
 
 /* ---------------- Private (pre-IPO) companies ----------------
  *
- * These are NOT in the xStocks catalog: the companies are private, so no
- * exchange lists them and Backed has no tracker certificate for two of the
- * three. Tessera wraps them as T-Tokens on Solana instead, and Rhea places them
- * on the globe at their real headquarters like any other company.
- *
- * The mints below are seeds so the globe still renders when Tessera's API is
- * unreachable. What is actually shown — marks, valuations, holders, which
- * markets are live — always comes from the live issuer API at runtime
- * (backend/src/tessera.ts); nothing here is a price.
+ * None of these are in the xStocks catalog: the companies are private, so no
+ * exchange lists them and Backed has no tracker certificate for them. PreStocks
+ * wraps them on Solana instead, and Rhea places them on the globe at their real
+ * headquarters like any other company. Every price, mark and valuation comes
+ * from the live issuer API at runtime (backend/src/prestocks.ts).
  */
-/* `private` marks a company with no quoted instrument anywhere, which is what
- * switches off the equity machinery: no session, no close to gap against, and
- * no Pyth or Yahoo lookup — querying an equity feed for an unlisted company
- * returns someone else's stock. Verified per company: OPENAI and KALSHI resolve
- * to nothing on Yahoo, while SpaceX's SPCX is quoted and so is not flagged.
- * `ticker` carries the name a person would actually say. */
+/* `private` marks a company with no quoted instrument, which switches off the
+ * equity machinery: no session, no close to gap against, and no Pyth or Yahoo
+ * lookup — querying an equity feed for an unlisted company returns someone
+ * else's stock. `ticker` carries the name a person would actually say, because
+ * a private company has none. */
 const PRIVATE_COMPANIES: Company[] = [
-  c("openai", "OpenAI", "OPENAI", "US", "Artificial Intelligence", "tOpenAI",
+  c("openai", "OpenAI", "OPENAI", "US", "Artificial Intelligence", "OPENAI",
     { name: "Mission Bay, San Francisco", lat: 37.7679, lng: -122.3915 },
-    { featured: true, private: true, issuerKey: "tessera", seedMint: TESSERA_MINTS.tOpenAI }),
-  c("kalshi", "Kalshi", "KALSHI", "US", "Prediction Markets", "tKalshi",
+    { featured: true, private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.OPENAI }),
+  c("anthropic", "Anthropic", "ANTHROPIC", "US", "Artificial Intelligence", "ANTHROPIC",
+    { name: "San Francisco, California", lat: 37.7880, lng: -122.3975 },
+    { featured: true, private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.ANTHROPIC }),
+  c("spacex", "SpaceX", "SPACEX", "US", "Aerospace", "SPACEX",
+    { name: "Starbase, Texas", lat: 25.9972, lng: -97.1560 },
+    { featured: true, private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.SPACEX }),
+  c("anduril", "Anduril", "ANDURIL", "US", "Defense Technology", "ANDURIL",
+    { name: "Costa Mesa, California", lat: 33.6695, lng: -117.9142 },
+    { featured: true, private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.ANDURIL }),
+  c("neuralink", "Neuralink", "NEURALINK", "US", "Neurotechnology", "NEURALINK",
+    { name: "Fremont, California", lat: 37.5485, lng: -121.9886 },
+    { private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.NEURALINK }),
+  c("figure-ai", "Figure AI", "FIGUREAI", "US", "Humanoid Robotics", "FIGUREAI",
+    { name: "San Jose, California", lat: 37.3382, lng: -121.8863 },
+    { private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.FIGUREAI }),
+  c("kalshi", "Kalshi", "KALSHI", "US", "Prediction Markets", "KALSHI",
     { name: "New York, New York", lat: 40.7411, lng: -74.0059 },
-    { featured: true, private: true, issuerKey: "tessera", seedMint: TESSERA_MINTS.tKalshi }),
+    { private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.KALSHI }),
+  c("polymarket", "Polymarket", "POLYMARKET", "US", "Prediction Markets", "POLYMARKET",
+    { name: "New York, New York", lat: 40.7260, lng: -73.9970 },
+    { private: true, issuerKey: "prestocks", seedMint: PRESTOCKS_MINTS.POLYMARKET }),
 ];
+
+/* ---- Excluded xStocks ----
+ *
+ * SPCXx is Backed's SpaceX tracker. PreStocks markets SpaceX as one of its
+ * pre-IPO names, so carrying a second SpaceX wrapper would put a competing
+ * pre-IPO token in the app; it is dropped from discovery and the `spacex` slug
+ * belongs to the PreStock above.
+ *
+ * Nothing else in the catalog needs excluding: every other underlying was
+ * checked against a live quote and resolves to a listed equity on a real
+ * exchange — SHEIN, Bending Spoons, Medline, Cerebras, BitGo and Jersey Mike's
+ * included. Re-run that audit before adding issuers.
+ */
+export const EXCLUDED_XSTOCK_SYMBOLS = new Set(["SPCXX"]);
 
 /* ---------------- Build COMPANIES from the catalog ---------------- */
 
@@ -330,7 +351,9 @@ const CURATED_BY_TOKEN = new Map(CURATED.map((co) => [co.tokenSymbol.toUpperCase
  * (or unset) sits in the US bucket until someone curates it. */
 const listingCountry = (c: string | null): CountryCode => (c && c in COUNTRIES ? (c as CountryCode) : "US");
 
-export const COMPANIES: Company[] = XSTOCKS_CATALOG.map((entry): Company => {
+export const COMPANIES: Company[] = XSTOCKS_CATALOG.filter(
+  (entry) => !EXCLUDED_XSTOCK_SYMBOLS.has(entry.symbol.toUpperCase()),
+).map((entry): Company => {
   const cur = CURATED_BY_TOKEN.get(entry.symbol.toUpperCase());
   if (cur) return { ...cur, seedMint: entry.mint, icon: entry.icon };
   return {
@@ -401,10 +424,11 @@ const COMPANY_ALIASES: Record<string, string> = {
   "s&p 500": "sp500", "s&p": "sp500", spy: "sp500", "sp500": "sp500", nasdaq: "nasdaq100", "nasdaq 100": "nasdaq100", qqq: "nasdaq100",
   "berkshire hathaway": "berkshire", "jp morgan": "jpmorgan", "j&j": "jnj", "johnson and johnson": "jnj", coke: "coca-cola", pepsi: "pepsico",
   "mcdonald's": "mcdonalds", "mcdonalds": "mcdonalds", exxonmobil: "exxon", lilly: "eli-lilly", "eli lilly": "eli-lilly", "gold trust": "gold",
-  "novo": "novo-nordisk", astra: "astrazeneca", "arm holdings": "arm", "hong kong exchanges": "hkex", "hkex": "hkex", "spacex": "spacex",
-  "united health": "unitedhealth", "space x": "spacex", "core weave": "coreweave", "app lovin": "applovin", "micron": "micron",
+  "novo": "novo-nordisk", astra: "astrazeneca", "arm holdings": "arm", "hong kong exchanges": "hkex", "hkex": "hkex", "spacex": "spacex", "space x": "spacex",
+  "united health": "unitedhealth", "core weave": "coreweave", "app lovin": "applovin", "micron": "micron",
   "p&g": "procter-gamble", "procter and gamble": "procter-gamble", "bofa": "bank-of-america", "bank of america": "bank-of-america",
-  "open ai": "openai", openai: "openai", chatgpt: "openai", "kalshi": "kalshi",
+  "open ai": "openai", openai: "openai", chatgpt: "openai", claude: "anthropic",
+  "figure": "figure-ai", "figure ai": "figure-ai", "neura link": "neuralink",
   "goldman": "goldman-sachs", "strc": "strategy-strc", "dfdv": "defi-development", "defi dev": "defi-development", "russell 2000": "iwm",
 };
 
@@ -435,17 +459,18 @@ export const XSTOCKS_DISCLOSURE_URL = "https://xstocks.com/";
 export const XSTOCKS_RESTRICTED_JURISDICTIONS = ["US", "GB", "CA", "AU"];
 export const XSTOCKS_MIN_TRADE_USD = 1;
 
-/* ---- Tessera T-Tokens (private markets) ----
- * A T-Token is a loan participation right against a Tessera issuer entity, not
- * equity and not a security — the holder is repaid from the proceeds of a
- * qualifying liquidity event. Tessera's terms exclude several jurisdictions,
- * the United States and China among them. The check is self-declared, not KYC.
- * https://docs.tessera.pe/overview/how-do-tessera-token-work */
-export const TESSERA_ISSUER = "Tessera (T-Tokens)";
-export const TESSERA_DISCLOSURE_URL = "https://docs.tessera.pe/overview/how-do-tessera-token-work";
-export const TESSERA_TERMS_URL = "https://terms.tessera.pe";
-export const TESSERA_RESTRICTED_JURISDICTIONS = ["US", "CN"];
-export const TESSERA_MIN_TRADE_USD = 1;
+/* ---- PreStocks (private markets) ----
+ * A PreStock is an issuer token backed 1:1 by SPV exposure tracking a private
+ * company's price. It carries economic exposure only — no ownership, voting,
+ * dividend or information rights — and is not affiliated with or endorsed by
+ * the company it references. Not available in the U.S. or to U.S. persons.
+ * The check is self-declared, not KYC. https://prestocks.com */
+export const PRESTOCKS_ISSUER = "PreStocks";
+export const PRESTOCKS_DISCLOSURE_URL = "https://prestocks.com/products";
+export const PRESTOCKS_TERMS_URL = "https://url.prestocks.com/terms-of-service";
+export const PRESTOCKS_RESTRICTED_JURISDICTIONS = ["US"];
+export const PRESTOCKS_MIN_TRADE_USD = 1;
+
 /** Jupiter Trigger V2 rejects deposits worth less than this (400 at deposit/craft). */
 export const TRIGGER_MIN_ORDER_USD = 10;
 

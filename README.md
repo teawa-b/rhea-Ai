@@ -3,7 +3,7 @@
 > Explore the market. Ask anything. Act onchain.
 
 Rhea is a WebXR market interface for **tokenized stocks on Solana** — listed companies through xStocks,
-and pre-IPO companies (OpenAI, SpaceX, Kalshi) through **Tessera** T-Tokens. Instead of rows in a brokerage
+and pre-IPO companies (OpenAI, Anthropic, SpaceX, Anduril and more) through **PreStocks**. Instead of rows in a brokerage
 dashboard, the market is a holographic globe. You talk to Rhea — a full-duplex voice agent built on
 **OpenAI GPT-Live-1** — and instead of a wall of text, *the AI takes you there*: it rotates the globe,
 illuminates a country, drops you at a company's headquarters, opens the live chart, pins the news that
@@ -24,8 +24,7 @@ Built for the [Stocklana hackathon](https://hackathons.solana.com/hackathons/sto
 | Layer | Source | Notes |
 | --- | --- | --- |
 | Tokenized stocks | **Jupiter Tokens API v2** (`xstocks` / `stocks` tags) | xStocks across 7 countries — counts are live, never hardcoded |
-| Pre-IPO companies | **Tessera** public API (`token-details`) | OpenAI, SpaceX and Kalshi as T-Tokens: issuer mark, mark valuation, holders |
-| Pre-IPO reserves | **Chainlink** Proof of Reserve (SmartData) | linked per token, never mirrored — the attestation refreshes ~monthly |
+| Pre-IPO companies | **PreStocks** public API | 8 private companies: issuer mark, mark valuation, implied valuation |
 | Curve design | **Meteora Dynamic Bonding Curve SDK** | reference-anchored launch curves for tokenized equities; read-only, never launches |
 | Onchain token price | **Jupiter Price API v3** | `usdPrice`, 24h change, liquidity |
 | Underlying equity price | **Pyth Pro** (with key) → Jupiter `stockData` → Yahoo (fallback) | source + timestamp always shown; stale data is flagged |
@@ -132,31 +131,32 @@ Key files: `backend/shared/tools.ts` (the AI tool system), `backend/src/prompts.
 
 ## Private markets (pre-IPO)
 
-Rhea prices three companies that are not listed anywhere — **OpenAI**, **SpaceX** and **Kalshi** —
-through [Tessera](https://app.tessera.pe)'s T-Tokens on Solana. They sit on the globe at their real
-headquarters alongside the listed companies, and the **Pre-IPO** chip in the top bar opens the panel.
+Rhea prices eight companies that no exchange lists — **OpenAI**, **Anthropic**, **SpaceX**, **Anduril**,
+**Neuralink**, **Figure AI**, **Kalshi** and **Polymarket** — through [PreStocks](https://prestocks.com)
+on Solana. They sit on the globe at their real headquarters alongside the listed companies, and the
+**Pre-IPO** chip in the top bar opens the panel.
 
 A private company breaks most of the assumptions an equity interface makes, so it is handled differently
 rather than squeezed into the same shape:
 
-- **There is no stock price.** The reference is Tessera's *mark* on the portfolio behind the token. Rhea
-  labels it as the issuer's mark and never calls it a market price.
+- **There is no stock price.** The reference is the issuer's *mark* on the exposure behind the token.
+  Rhea labels it as the issuer's mark and never calls it a market price.
 - **There is no session.** The panel says *private · trades 24/7* instead of quoting US market hours.
 - **The number that matters is the gap.** `premiumToMarkPct` is the onchain price against the issuer's
-  own per-token mark, and it is currently wide — the three tokens have traded anywhere from +8% to +32%
-  above mark. Scaling the issuer's mark valuation by that premium gives the **implied valuation**: what
-  the market says the whole company is worth.
-- **Jupiter's `stockData` is deliberately ignored for these.** For Tessera mints it reports the company
-  on a different notional basis than the token — on 19 Sep 2026, $762.36 against the issuer's $423.00
-  for T-SpaceX — so dividing by it would invent a 25–50% "discount" that does not exist.
-- **A T-Token is not a share.** It is a loan participation right against a Tessera issuer entity: no
-  ownership, no voting, no dividends, no place on the cap table. The disclosure and the excluded
-  jurisdictions (US, CN) are stated in the panel and before any trade.
-- **SpaceX is wrapped twice**, by Backed (SPCXx) and Tessera (tSpaceX). Both are priced independently and
-  shown side by side, with a note that they are different instruments — not two quotes for one thing.
+  own per-token mark, and it runs both ways — while this was built, Neuralink traded ~25% above mark
+  and SpaceX ~20% below. Scaling the issuer's mark valuation by that premium gives the **implied
+  valuation**: what the market says the whole company is worth. The formula is PreStocks' own and
+  reproduces their published `impliedValuation` exactly.
+- **Jupiter's `stockData` is deliberately ignored for these.** It reports these mints on a
+  company-level basis rather than the token's, so using it as the mark would invent a gap.
+- **A PreStock is not a share.** It is an issuer token backed 1:1 by SPV exposure: economic exposure
+  only, no ownership, voting, dividend or information rights, and not affiliated with or endorsed by the
+  company it references. The disclosure and the US restriction are stated in the panel and before any
+  trade.
 
-Reserve attestations are Chainlink Proof of Reserve feeds, linked out rather than cached: the auditor
-attestation behind them refreshes about monthly, so a stored copy would quietly go stale.
+To keep the pre-IPO layer single-issuer, **SPCXx** (Backed's SpaceX tracker) is excluded from discovery
+— see `EXCLUDED_XSTOCK_SYMBOLS` in `shared/registry.ts`. Every other underlying in the xStocks catalog
+was checked against a live quote and resolves to a listed equity, so nothing else needed gating.
 
 ## Curve studio (Meteora DBC)
 

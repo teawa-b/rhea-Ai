@@ -197,11 +197,11 @@ export function Hud() {
   /* A focused place's panel waits until the camera has arrived (panelReady). */
   const placePanel = panelReady && (focusedCompany || focusedCountry || focusedRegion);
   const gatePanel = !pendingTrade && !pendingOrder && (depositPrompt || loginPrompt);
-  /* Counted apart on purpose. A T-Token is a loan participation right against an
-   * issuer entity, not a share, so it does not belong in a "tokenized stocks"
-   * total — the same distinction the panels and the voice prompt hold to. */
-  const listedCount = overview?.assets.filter((a) => a.issuerKey !== "tessera").length ?? 0;
-  const preIpoCount = overview?.assets.filter((a) => a.issuerKey === "tessera").length ?? 0;
+  /* Counted apart on purpose. A PreStock tracks a private company that no
+   * exchange lists, so it does not belong in a "tokenized stocks" total — the
+   * same distinction the panels and the voice prompt hold to. */
+  const listedCount = overview?.assets.filter((a) => a.issuerKey !== "prestocks").length ?? 0;
+  const preIpoCount = overview?.assets.filter((a) => a.issuerKey === "prestocks").length ?? 0;
 
   const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || privateMarkets || dbcStudio != null || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
   const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };

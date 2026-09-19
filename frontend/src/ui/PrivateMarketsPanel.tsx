@@ -6,7 +6,7 @@
  * this panel that a holder cannot get anywhere else, so it is the headline.
  *
  * The bar under each row is that gap drawn to scale, centred on the mark:
- * right of centre means the market is paying above what Tessera says the
+ * right of centre means the market is paying above what the issuer says the
  * exposure is worth, left means below.
  */
 import { useEffect, useState } from "react";
@@ -72,7 +72,7 @@ function Row({ a, onOpen }: { a: PrivateMarketSnapshot; onOpen: (id: string) => 
       <div style={{ marginTop: 8 }}>
         {pct == null ? (
           <div className="hint">
-            {a.markUnavailable ? "Tessera's mark is unavailable right now, so there is nothing to compare the onchain price against." : "No mark to compare against."}
+            {a.markUnavailable ? "The issuer's mark is unavailable right now, so there is nothing to compare the onchain price against." : "No mark to compare against."}
           </div>
         ) : (
           <>
@@ -93,19 +93,6 @@ function Row({ a, onOpen }: { a: PrivateMarketSnapshot; onOpen: (id: string) => 
         {!a.tradable ? <span className="tag amber">too thin to trade</span> : null}
         {a.liquidityUsd != null ? <span className="hint">liquidity {fmtUsd(a.liquidityUsd, 0)}</span> : null}
         {a.holders != null ? <span className="hint">{a.holders.toLocaleString()} holders</span> : null}
-        {a.attestation ? (
-          <a
-            className="hint"
-            href={a.attestation.attestationUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            title={a.attestation.note}
-            style={{ color: C.frost }}
-          >
-            reserve feed ↗
-          </a>
-        ) : null}
         <span className="hint">mark {fmtAge(a.markFetchedAt)}</span>
       </div>
     </div>
@@ -146,8 +133,8 @@ export function PrivateMarketsPanel() {
         {error ? <div className="hint" style={{ color: C.red }}>{error}</div> : null}
 
         <p className="hint" style={{ marginTop: 0 }}>
-          These companies are not listed anywhere, so there is no exchange price. The reference is Tessera's
-          mark on the portfolio behind each token; the bar shows what the onchain market is paying against it.
+          These companies are not listed anywhere, so there is no exchange price. The reference is the
+          issuer's mark on the exposure behind each token; the bar shows what the onchain market pays against it.
         </p>
 
         {data?.assets.map((a) => <Row key={a.mint} a={a} onOpen={focusCompany} />)}

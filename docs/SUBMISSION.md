@@ -37,32 +37,36 @@ I plan to keep working on Rhea after Stocklana and enter it in **Colosseum's Cry
 
 ## Bounty tracks
 
-### Tessera — pre-IPO T-Tokens
+### PreStocks — pre-IPO companies
 
-Rhea puts OpenAI, SpaceX and Kalshi on the same globe as the listed companies, at their real
-headquarters, and prices them the way private companies actually have to be priced.
+Rhea puts all eight PreStocks names — OpenAI, Anthropic, SpaceX, Anduril, Neuralink, Figure AI, Kalshi
+and Polymarket — on the same globe as the listed companies, at their real headquarters, and prices them
+the way private companies actually have to be priced.
 
 The interesting part is that almost nothing an equity interface assumes survives contact with a private
 company, so Rhea handles them as their own case rather than forcing them into the xStocks shape. There is
-no stock price, so the reference is Tessera's mark on the portfolio behind the token. There is no
+no stock price, so the reference is the issuer's mark on the exposure behind the token. There is no
 session, so the panel says *private · trades 24/7*. There is no 4pm close to gap against, so the headline
 number becomes **premium to mark** — the onchain price against the issuer's own per-token mark — and,
-scaling the issuer's valuation by it, the **implied valuation** of the whole company.
+scaling the issuer's valuation by it, the **implied valuation** of the whole company. That formula is
+PreStocks' own, and it reproduces their published `impliedValuation` to the decimal.
 
-That gap is live and wide: the three tokens have traded between +8% and +32% above Tessera's marks while
-this was being built. It is also easy to get wrong. Jupiter's `stockData` reports Tessera mints on a
-different notional basis than the token — $762.36 against the issuer's $423.00 for T-SpaceX — so the
-obvious implementation invents a 25–50% discount that does not exist. Rhea computes the premium only
-against Tessera's own per-token mark, and says so at both call sites.
+That gap is live and it runs both ways: while this was being built, Neuralink traded ~25% above mark
+while SpaceX sat ~20% below it, so the panel's diverging bar earns its two sides. It is also easy to get
+wrong — Jupiter's `stockData` reports these mints on a company-level basis rather than the token's, so
+the obvious implementation invents a gap that is not there. Rhea computes the premium only against the
+issuer's per-token mark, and says so at both call sites.
 
-SpaceX is the other case worth seeing: it is wrapped by both Backed (SPCXx) and Tessera (tSpaceX), so
-Rhea models multiple tokenized wrappers per company and prices them side by side — with a note that they
-are different instruments with different backing, not two quotes for one thing.
+Eligibility was handled as an engineering problem rather than an assumption. The bounty excludes projects
+carrying non-PreStocks pre-IPO tokens, so every underlying in the ~830-name xStocks catalog was checked
+against a live quote. All of them resolve to listed equities — SHEIN, Bending Spoons, Medline, Cerebras
+and BitGo included — so the only conflict was **SPCXx**, Backed's SpaceX tracker, competing with a
+PreStocks headline name. It is excluded from discovery by symbol, with the audit documented in the
+registry so it can be re-run when issuers change.
 
-Throughout, a T-Token is described as what it is: a loan participation right against a Tessera issuer
-entity, with no ownership, voting, dividends or cap-table position, and excluded jurisdictions stated
-before any trade. Chainlink's Proof of Reserve feeds are linked rather than mirrored, because the
-attestation behind them refreshes monthly and a cached copy would quietly go stale.
+Throughout, a PreStock is described as what the issuer says it is: a token backed 1:1 by SPV exposure,
+carrying economic exposure only, with no ownership, voting, dividend or information rights, not
+affiliated with or endorsed by the company, and not available to US persons — stated before any trade.
 
 ### Meteora — Dynamic Bonding Curve
 

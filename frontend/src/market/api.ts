@@ -1,6 +1,6 @@
 /* Client-side fetchers for the Rhea API. */
 import type {
-  Briefing, ChartHistory, ChartRange, Company, CorporateAction, DbcCurvePlan, DbcPlanInput, DbcPoolStatus, DbcPreset, EligibilityResult, MarketOverview, MarketSessionInfo, Portfolio, PriceSnapshot, PrivateMarketsOverview, ProofOfReserves, ReserveAttestation, TokenizedAsset, TradeQuote, AssetCapability,
+  Briefing, ChartHistory, ChartRange, Company, CorporateAction, DbcCurvePlan, DbcPlanInput, DbcPoolStatus, DbcPreset, EligibilityResult, MarketOverview, MarketSessionInfo, Portfolio, PriceSnapshot, PrivateMarketsOverview, ProofOfReserves, TokenizedAsset, TradeQuote, AssetCapability,
 } from "@shared/types";
 
 /* Where the API lives. Empty in local dev (Vite proxies /api → the backend);
@@ -30,14 +30,13 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type ServerStatus = { openai: boolean; jupiterKey: boolean; pythKey: boolean; streetView: boolean; rpc: string; liveModel: string; backendModel: string };
 /** One tokenized wrapper of a company, priced on its own terms. A company can
- *  have more than one (SpaceX is wrapped by both Backed and Tessera). */
+ *  have more than one if two issuers wrap the same exposure. */
 export type CompanyWrapperDetail = {
   asset: TokenizedAsset;
   price: PriceSnapshot;
   capability: AssetCapability;
   disclosure: string;
   disclosureUrl: string;
-  attestation: ReserveAttestation | null;
 };
 export type CompanyDetail = {
   company: Company; asset: TokenizedAsset | null; price: PriceSnapshot; corporateActions: CorporateAction[];
@@ -83,7 +82,7 @@ export const api = {
    * A thrown error carries .status (401 = JWT expired or invalid: trade.ts drops its cached token). */
   trigger: (step: TriggerStep, body: unknown, jwt?: string) =>
     j<Record<string, unknown>>(`/api/market/trigger/${step}`, { method: "POST", body: JSON.stringify(body ?? {}), headers: jwt ? { "x-trigger-jwt": jwt } : {} }),
-  /* Private (pre-IPO) markets: Tessera T-Tokens, their issuer marks and what
+  /* Private (pre-IPO) markets: PreStocks, their issuer marks and what
    * the onchain market pays over them. */
   privateMarkets: () => j<PrivateMarketsOverview>("/api/market/private"),
   /* Meteora DBC studio — all read-only. */

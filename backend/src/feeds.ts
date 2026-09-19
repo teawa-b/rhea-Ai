@@ -13,7 +13,7 @@
 import { COMPANY_BY_ID } from "../shared/registry";
 import type { Candle, ChartHistory, ChartRange, Company, MarketSessionInfo, PriceSnapshot, SessionLabel, TokenizedAsset } from "../shared/types";
 import { getPrices } from "./jupiter";
-import { impliedValuation, premiumToMark, tesseraByMint } from "./tessera";
+import { impliedValuation, preStockByMint, premiumToMark } from "./prestocks";
 import { xstocksAsset } from "./xstocks";
 
 const PYTH_KEY = process.env.PYTH_PRO_API_KEY || "";
@@ -226,20 +226,19 @@ export async function lastCloseFor(company: Company): Promise<{ lastCloseUsd: nu
 
 /* ---------------- Snapshot ---------------- */
 
-/* ---------------- Private markets: T-Token snapshot ----------------
+/* ---------------- Private markets: PreStock snapshot ----------------
  *
  * A private company has no exchange, so there is no last trade, no session and
  * no close to gap against. The reference is the issuer's mark on the segregated
  * portfolio, and the number that matters is what the onchain market is paying
  * over (or under) it. Jupiter's `stockData` is deliberately ignored here: for
- * Tessera mints it reports the company on a different notional basis than the
- * token, so dividing by it invents a discount that does not exist.
+ * these mints it reports the company on its own basis rather than the token's.
  */
-async function tesseraSnapshot(company: Company, asset: TokenizedAsset): Promise<PriceSnapshot> {
+async function preStockSnapshot(company: Company, asset: TokenizedAsset): Promise<PriceSnapshot> {
   const mint = asset.mint;
   const [jup, mark] = await Promise.all([
     getPrices([mint]).then((m) => m[mint]).catch(() => undefined),
-    tesseraByMint(mint),
+    preStockByMint(mint),
   ]);
 
   const tokenPrice = jup?.usdPrice ?? null;
@@ -254,7 +253,7 @@ async function tesseraSnapshot(company: Company, asset: TokenizedAsset): Promise
     mint,
     tokenPriceUsd: tokenPrice,
     underlyingPriceUsd: mark?.markPriceUsd ?? null,
-    underlyingSource: mark?.markPriceUsd != null ? "tessera-mark" : "none",
+    underlyingSource: mark?.markPriceUsd != null ? "issuer-mark" : "none",
     markPriceUsd: mark?.markPriceUsd ?? null,
     premiumToMarkPct: premium == null ? null : Math.round(premium * 100) / 100,
     impliedValuationUsd: impliedValuation(tokenPrice, mark),
@@ -277,9 +276,9 @@ async function tesseraSnapshot(company: Company, asset: TokenizedAsset): Promise
 }
 
 export async function priceSnapshot(company: Company, asset: TokenizedAsset | undefined): Promise<PriceSnapshot> {
-  /* Branch on the asset's issuer, not the company's: SpaceX is wrapped by both
-   * Backed and Tessera, and only the T-Token is priced against an issuer mark. */
-  if (asset?.issuerKey === "tessera") return tesseraSnapshot(company, asset);
+  /* Branch on the asset's issuer, not the company's: only a PreStock is priced
+   * against an issuer mark, and a company could be wrapped by more than one. */
+  if (asset?.issuerKey === "prestocks") return preStockSnapshot(company, asset);
   const mint = asset?.mint ?? "";
   const [jup, pyth, session, info, close, xs] = await Promise.all([
     mint ? getPrices([mint]).then((m) => m[mint]).catch(() => undefined) : Promise.resolve(undefined),

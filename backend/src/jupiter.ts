@@ -2,11 +2,11 @@
  * execution, and the Trigger V2 proxy. Keyless requests go to lite-api.jup.ag;
  * with JUPITER_API_KEY we use api.jup.ag (Swap V2, stocks tag, Trigger). */
 import {
-  COMPANIES, COMPANY_BY_TOKEN, MIN_TRADABLE_LIQUIDITY_USD, SOL_MINT, TESSERA_ISSUER, TRIGGER_MIN_ORDER_USD, USDC_MINT,
+  COMPANIES, COMPANY_BY_TOKEN, MIN_TRADABLE_LIQUIDITY_USD, PRESTOCKS_ISSUER, SOL_MINT, TRIGGER_MIN_ORDER_USD, USDC_MINT,
   assetIdFor, effectiveUiMultiplier, rawToUiAmount, uiToRawAmount,
 } from "../shared/registry";
 import type { Company, IssuerKey, TokenizedAsset, TradeQuote, TradeSide } from "../shared/types";
-import { tesseraTokens } from "./tessera";
+import { preStocksCatalog } from "./prestocks";
 
 const API_KEY = process.env.JUPITER_API_KEY || "";
 const KEYED = "https://api.jup.ag";
@@ -138,11 +138,11 @@ type JupToken = {
 };
 
 const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
-/* xStocks mint at 8 decimals, Tessera T-Tokens at 9. Overridden by whatever
+/* xStocks mint at 8 decimals, PreStocks at 9. Overridden by whatever
  * Jupiter Price v3 reports for the mint. */
-const DEFAULT_DECIMALS: Record<IssuerKey, number> = { xstocks: 8, tessera: 9 };
-const issuerName = (k: IssuerKey) => (k === "tessera" ? TESSERA_ISSUER : "xStocks (Backed)");
-const issuerLabel = (k: IssuerKey) => (k === "tessera" ? "T-Token" : "xStock");
+const DEFAULT_DECIMALS: Record<IssuerKey, number> = { xstocks: 8, prestocks: 9 };
+const issuerName = (k: IssuerKey) => (k === "prestocks" ? PRESTOCKS_ISSUER : "xStocks (Backed)");
+const issuerLabel = (k: IssuerKey) => (k === "prestocks" ? "PreStock" : "xStock");
 
 /** One tokenized wrapper of one company, before it is priced. */
 type WrapperRef = {
@@ -185,17 +185,17 @@ export async function listTokenizedAssets(force = false): Promise<TokenizedAsset
 
   /* Live issuer catalogs refresh the seeds: mints, symbols and which markets
    * exist all come from the issuer, never from a constant in this repo. */
-  const tessera = await tesseraTokens().catch(() => null);
-  if (tessera) {
-    for (const t of tessera) {
-      const co = COMPANY_BY_TOKEN[t.code.toUpperCase()] ?? COMPANY_BY_TOKEN[t.symbol.toUpperCase()];
+  const preStocks = await preStocksCatalog().catch(() => null);
+  if (preStocks) {
+    for (const t of preStocks) {
+      const co = COMPANY_BY_TOKEN[t.symbol.toUpperCase()];
       if (!co) continue;
-      const primary = (co.issuerKey ?? "xstocks") === "tessera";
+      const primary = (co.issuerKey ?? "xstocks") === "prestocks";
       /* A refreshed mint supersedes the seed for the same company+issuer. */
-      for (const [mint, r] of refs) if (r.company.id === co.id && r.issuerKey === "tessera" && mint !== t.mint) refs.delete(mint);
+      for (const [mint, r] of refs) if (r.company.id === co.id && r.issuerKey === "prestocks" && mint !== t.mint) refs.delete(mint);
       addRef({
-        company: co, issuerKey: "tessera", primary, mint: t.mint,
-        symbol: t.code, name: t.name, decimals: 9, tokenProgram: TOKEN_2022,
+        company: co, issuerKey: "prestocks", primary, mint: t.mint,
+        symbol: t.symbol, name: t.name, icon: t.image, decimals: 9, tokenProgram: TOKEN_2022,
       });
     }
   }
