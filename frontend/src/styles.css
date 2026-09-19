@@ -396,3 +396,26 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
 }
 .sect-body { padding-bottom: 4px; }
 @media (prefers-reduced-motion: reduce) { .sect .caret { transition: none; } }
+
+/* Price header: one number carries the panel. The change rides its baseline
+   so the pair reads as a single object rather than two stacked facts. */
+.price { display: flex; align-items: baseline; gap: 10px; }
+.price-now {
+  font-family: var(--mono); font-size: 32px; font-weight: 600;
+  letter-spacing: -0.02em; line-height: 1.05; color: #fff;
+}
+.price-chg { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+
+/* The chart sat in its own bordered box inside the panel's bordered box. One
+   frame is enough; the plot keeps a faint ground so the line has something to
+   sit on. */
+.chart-wrap canvas { border: 0; background: rgba(5,6,13,0.35); }
+
+/* Section rhythm: the divider already separates, so it does not also need a
+   wide margin on the side that touches a section header. */
+.sect + .sect-body { padding-top: 2px; }
+.divider + .sect { margin-top: -2px; }
+
+@media (max-width: 600px) {
+  .price-now { font-size: 28px; }
+}

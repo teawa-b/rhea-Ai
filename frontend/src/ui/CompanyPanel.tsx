@@ -101,6 +101,28 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
    * mark, there is no session and no 4pm close to gap against. */
   const isPrivate = Boolean(co?.private) || p?.underlyingSource === "issuer-mark";
   const premium = p?.premiumToMarkPct ?? null;
+  /* What the reference price is called, and where it came from. */
+  const refLabel = isPrivate ? "Issuer mark" : "Underlying";
+  const refSource = p?.underlyingSource === "issuer-mark" ? "PreStocks"
+    : p?.underlyingSource === "pyth" ? "Pyth Pro"
+    : p?.underlyingSource === "jupiter-stockdata" ? "xStocks ref"
+    : p?.underlyingSource === "yahoo" ? "Yahoo" : "";
+  /* The session is steady state, so it reads as text rather than a chip. */
+  const sessionText = isPrivate
+    ? "Private company · trades 24/7"
+    : p ? session ?? p.marketSession.replace("_", " ") : "…";
+  /* At most one chip: the single number worth flagging about this price. */
+  const notable: { label: string; tone: string; title?: string } | null =
+    isPrivate && premium != null
+      ? { label: `${premium >= 0 ? "+" : ""}${premium.toFixed(2)}% vs mark`, tone: premium >= 0 ? "green" : "magenta",
+          title: `Onchain ${fmtUsd(p?.tokenPriceUsd)} against the issuer's mark of ${fmtUsd(p?.markPriceUsd)} per token` }
+      : gap != null
+        ? { label: `${gap >= 0 ? "+" : ""}${gap.toFixed(2)}% vs 4pm close`, tone: gap >= 0 ? "green" : "magenta",
+            title: p?.lastCloseUsd != null ? `Solana token ${fmtUsd(p.tokenPriceUsd)} vs ${fmtUsd(p.lastCloseUsd)} at the US 4pm ET close` : undefined }
+        : divergence != null && Math.abs(divergence) > 0.5
+          ? { label: `${divergence > 0 ? "+" : ""}${divergence.toFixed(2)}% vs stock`, tone: "amber" }
+          : null;
+
   /* Every tokenized wrapper of this company. More than one means two issuers
    * wrap the same exposure and their prices are worth comparing directly. */
   const wrappers = detail?.wrappers ?? [];
@@ -148,33 +170,35 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         <button className="icon-btn" onClick={() => focusCountry(co.countryCode)} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
       </div>
       <div className="panel-body scroll">
-        {/* Prices */}
-        <div className="row" style={{ alignItems: "baseline", gap: 14 }}>
-          <div>
-            <div className="hint">{p?.underlyingSource === "issuer-mark" ? "ISSUER MARK · PreStocks" : `UNDERLYING · ${p?.underlyingSource === "pyth" ? "Pyth Pro" : p?.underlyingSource === "jupiter-stockdata" ? "Jupiter · xStocks ref" : p?.underlyingSource === "yahoo" ? "Yahoo (fallback)" : "—"}`}</div>
-            <div className="big">{fmtUsd(p?.underlyingPriceUsd)}</div>
-          </div>
-          <div>
-            <div className="hint">ONCHAIN TOKEN · Jupiter</div>
-            <div className="big" style={{ fontSize: 20 }}>{fmtUsd(p?.tokenPriceUsd)} <span className={cls} style={{ fontSize: 13 }}>{fmtPct(change)}</span></div>
-          </div>
+        {/* Prices.
+         *
+         * One hero number. The onchain price is what a buy actually costs, so
+         * it gets the size; the reference — an equity quote for a listed
+         * company, the issuer's mark for a private one — sits under it as a
+         * quiet line with its own age, because they are different data with
+         * different timestamps and that has to stay visible.
+         *
+         * Steady-state facts (the session) are plain text. A bordered chip is
+         * reserved for something notable: a premium to mark, a gap to the 4pm
+         * close, a halt, stale data. */}
+        <div className="price">
+          <span className="price-now">{fmtUsd(p?.tokenPriceUsd)}</span>
+          <span className={`price-chg ${cls}`}>{fmtPct(change)}</span>
         </div>
-        <div className="row" style={{ marginTop: 6 }}>
-          {isPrivate
-            ? <span className="tag dim" style={CASE} title="A private company has no exchange session; the Solana market runs continuously.">private · trades 24/7</span>
-            : <span className={`tag ${inSession ? "green" : "dim"}`}>{p ? session ?? p.marketSession.replace("_", " ") : "…"}</span>}
+        <div className="hint">onchain · Jupiter · {fmtAge(p?.tokenUpdatedAt)}</div>
+
+        <div className="hint" style={{ marginTop: 6 }}>
+          {refLabel} <span className="mono" style={{ color: "#cfe3f5" }}>{fmtUsd(p?.underlyingPriceUsd)}</span>
+          {refSource ? ` · ${refSource}` : ""} · {fmtAge(p?.underlyingUpdatedAt)}
+        </div>
+
+        <div className="row" style={{ marginTop: 8 }}>
+          {notable ? (
+            <span className={`tag ${notable.tone}`} style={CASE} title={notable.title}>{notable.label}</span>
+          ) : null}
           {p?.halted ? <span className="tag magenta" title="The issuer has halted this xStock">issuer halt</span> : null}
           {p?.stale ? <span className="tag amber">stale data</span> : null}
-          {isPrivate && premium != null ? (
-            <span className={`tag ${premium >= 0 ? "green" : "magenta"}`} style={CASE} title={`Onchain ${fmtUsd(p?.tokenPriceUsd)} against the issuer's mark of ${fmtUsd(p?.markPriceUsd)} per token`}>
-              Token {premium >= 0 ? "+" : ""}{premium.toFixed(2)}% vs mark
-            </span>
-          ) : gap != null ? (
-            <span className={`tag ${gap >= 0 ? "green" : "magenta"}`} style={CASE} title={p?.lastCloseUsd != null ? `Solana token ${fmtUsd(p.tokenPriceUsd)} vs ${fmtUsd(p.lastCloseUsd)} at the US 4pm ET close` : undefined}>
-              Token {gap >= 0 ? "+" : ""}{gap.toFixed(2)}% vs 4pm close
-            </span>
-          ) : divergence != null && Math.abs(divergence) > 0.5 ? <span className="tag amber">token {divergence > 0 ? "+" : ""}{divergence.toFixed(2)}% vs stock</span> : null}
-          <span className="hint">token {fmtAge(p?.tokenUpdatedAt)} · {isPrivate ? "mark" : "stock"} {fmtAge(p?.underlyingUpdatedAt)}</span>
+          <span className="hint">{sessionText}</span>
         </div>
 
         {isPrivate && p?.impliedValuationUsd ? (
