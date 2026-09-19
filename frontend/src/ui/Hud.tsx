@@ -328,10 +328,17 @@ export function Hud() {
               {focusedCompany ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">{COMPANY_BY_ID[focusedCompany]?.name}</span></>) : null}
               {comparison ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Compare</span></>) : null}
               {showPortfolio ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Holdings</span></>) : null}
+              {collapsed ? <button type="button" className="crumb details" onClick={() => setPanelOpen(true)} aria-expanded={false}>Details <span aria-hidden>⌃</span></button> : null}
             </nav>
+          ) : collapsed ? (
+            /* No trail to hang it on (news, exposure heat, pre-IPO, curve studio): a pill of its own, same size. */
+            <button type="button" className="crumbs peek clickable" onClick={() => setPanelOpen(true)} aria-expanded={false}>
+              <span className="crumb current">{peekTitle({ focusedCompany, focusedCountry, focusedRegion, comparison, showPortfolio, demoMode, privateMarkets, dbcStudio, newsTarget: news?.target ?? null, heat: heatEntries.length > 0 })}</span>
+              <span className="crumb details">Details <span aria-hidden>⌃</span></span>
+            </button>
           ) : null}
-          <div className="captions scroll" ref={capRef} style={{ maxHeight: ar ? "24vh" : "34vh" }}>
-            {captions.map((c) => (
+          <div className="captions scroll" ref={capRef} style={{ maxHeight: narrow ? (ar ? "16vh" : "20vh") : "34vh" }}>
+            {(narrow ? captions.slice(-2) : captions).map((c) => (
               <div key={c.id} className={`caption ${c.role}`}>
                 <span className="who">{c.role === "user" ? "You" : "Rhea"}</span>
                 {c.text}
@@ -347,17 +354,6 @@ export function Hud() {
             </div>
           ) : null}
         </div>
-
-        {collapsed ? (
-          <button type="button" className="peek clickable" onClick={() => setPanelOpen(true)} aria-expanded={false}>
-            <span className="peek-grip" aria-hidden />
-            <span className="peek-text">
-              <b>{peekTitle({ focusedCompany, focusedCountry, focusedRegion, comparison, showPortfolio, demoMode, privateMarkets, dbcStudio, newsTarget: news?.target ?? null, heat: heatEntries.length > 0 })}</b>
-              <small>Tap for details</small>
-            </span>
-            <span className="peek-chevron" aria-hidden>⌃</span>
-          </button>
-        ) : null}
 
         {showPanel && !collapsed ? (
           <div className="right">
@@ -424,7 +420,7 @@ export function Hud() {
           ) : null}
         </div>
         <form className="row clickable ask" onSubmit={(e) => { e.preventDefault(); const q = text.trim(); if (!q) return; sendText(q, auth); setText(""); }}>
-          <input className="chip ask-input" placeholder={`Ask Rhea… e.g. "Why is Nvidia moving?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />
+          <input className="chip ask-input" placeholder={narrow ? (live ? `${voiceTitle}… or type` : "Ask Rhea…") : `Ask Rhea… e.g. "Why is Nvidia moving?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />
           <button className="btn sm" type="submit">Ask</button>
         </form>
       </div>
