@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+<defs>
+<radialGradient id="rhea-mascot-body" cx="40%" cy="35%" r="68%">
+<stop offset="0" stop-color="#14f195"/>
+<stop offset=".55" stop-color="#9945ff"/>
+<stop offset="1" stop-color="#05060d"/>
+</radialGradient>
+<linearGradient id="rhea-mascot-ring" x1="0" y1="0" x2="1" y2="0">
+<stop stop-color="#9945ff"/>
+<stop offset=".48" stop-color="#3fe0ff"/>
+<stop offset="1" stop-color="#14f195"/>
+</linearGradient>
+<filter id="rhea-mascot-glow" x="-70%" y="-70%" width="240%" height="240%">
+<feGaussianBlur stdDeviation="10"/>
+</filter>
+<clipPath id="rhea-mascot-clip"><circle cx="120" cy="115" r="54"/></clipPath>
+</defs>
+<circle cx="120" cy="115" r="66" fill="#9945ff" opacity=".2" filter="url(#rhea-mascot-glow)"/>
+<circle cx="111" cy="106" r="57" fill="#14f195" opacity=".12" filter="url(#rhea-mascot-glow)"/>
+<ellipse cx="120" cy="122" rx="86" ry="36" fill="none" stroke="url(#rhea-mascot-ring)" stroke-width="9" transform="rotate(-18 120 122)"/>
+<circle cx="120" cy="115" r="54" fill="url(#rhea-mascot-body)" stroke="#8fe8ff" stroke-width="2.5"/>
+<path d="M60 122C86 91 154 91 180 122" fill="none" stroke="#05060d" stroke-width="8" opacity=".46" transform="rotate(-18 120 122)" clip-path="url(#rhea-mascot-clip)"/>
+<ellipse cx="101" cy="87" rx="12" ry="6" fill="#8fe8ff" opacity=".58" transform="rotate(-28 101 87)"/>
+<ellipse cx="106" cy="94" rx="5" ry="3" fill="#e8f4ff" opacity=".38" transform="rotate(-28 106 94)"/>
+<g fill="#e8f4ff">
+<ellipse cx="102" cy="112" rx="6" ry="9" transform="rotate(-7 102 112)"/>
+<ellipse cx="138" cy="112" rx="6" ry="9" transform="rotate(7 138 112)"/>
+</g>
+<g fill="#3fe0ff" opacity=".68">
+<circle cx="104" cy="110" r="2"/>
+<circle cx="136" cy="110" r="2"/>
+</g>
+<path d="M59 122C86 154 154 154 181 122" fill="none" stroke="url(#rhea-mascot-ring)" stroke-width="9" stroke-linecap="round" transform="rotate(-18 120 122)"/>
+<path d="M66 119C92 143 149 145 174 124" fill="none" stroke="#8fe8ff" stroke-width="2" opacity=".74" transform="rotate(-18 120 122)"/>
+</svg>

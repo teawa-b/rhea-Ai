@@ -1,1 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#05060d"/><circle cx="32" cy="32" r="18" fill="none" stroke="#3fe0ff" stroke-width="2.5"/><ellipse cx="32" cy="32" rx="18" ry="7" fill="none" stroke="#3fe0ff" stroke-width="1.5" opacity=".6"/><line x1="14" y1="32" x2="50" y2="32" stroke="#3fe0ff" stroke-width="1.5" opacity=".6"/><circle cx="40" cy="24" r="3.5" fill="#3fe0ff"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<defs>
+<radialGradient id="rhea-fav-body" cx="40%" cy="35%" r="68%">
+<stop offset="0" stop-color="#14f195"/>
+<stop offset=".55" stop-color="#9945ff"/>
+<stop offset="1" stop-color="#05060d"/>
+</radialGradient>
+</defs>
+<rect width="64" height="64" rx="14" fill="#05060d"/>
+<ellipse cx="32" cy="33" rx="23" ry="9" fill="none" stroke="#3fe0ff" stroke-width="3" transform="rotate(-18 32 33)"/>
+<circle cx="32" cy="31" r="15" fill="url(#rhea-fav-body)" stroke="#8fe8ff" stroke-width="1.5"/>
+<path d="M23 28a2.5 3 0 1 0 5 0 2.5 3 0 1 0-5 0m13 0a2.5 3 0 1 0 5 0 2.5 3 0 1 0-5 0" fill="#e8f4ff"/>
+</svg>

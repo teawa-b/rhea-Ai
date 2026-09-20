@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+<defs>
+<radialGradient id="rhea-192-body" cx="40%" cy="35%" r="68%">
+<stop offset="0" stop-color="#14f195"/>
+<stop offset=".55" stop-color="#9945ff"/>
+<stop offset="1" stop-color="#05060d"/>
+</radialGradient>
+<linearGradient id="rhea-192-ring" x1="0" y1="0" x2="1" y2="0">
+<stop stop-color="#9945ff"/>
+<stop offset=".48" stop-color="#3fe0ff"/>
+<stop offset="1" stop-color="#14f195"/>
+</linearGradient>
+<filter id="rhea-192-glow" x="-60%" y="-60%" width="220%" height="220%">
+<feGaussianBlur stdDeviation="7"/>
+</filter>
+<clipPath id="rhea-192-clip"><circle cx="96" cy="94" r="43"/></clipPath>
+</defs>
+<rect width="192" height="192" rx="42" fill="#05060d"/>
+<circle cx="96" cy="94" r="49" fill="#9945ff" opacity=".25" filter="url(#rhea-192-glow)"/>
+<ellipse cx="96" cy="99" rx="67" ry="28" fill="none" stroke="url(#rhea-192-ring)" stroke-width="7" transform="rotate(-18 96 99)"/>
+<circle cx="96" cy="94" r="43" fill="url(#rhea-192-body)" stroke="#8fe8ff" stroke-width="2"/>
+<path d="M49 99C69 75 123 75 143 99" fill="none" stroke="#05060d" stroke-width="6" opacity=".42" transform="rotate(-18 96 99)" clip-path="url(#rhea-192-clip)"/>
+<ellipse cx="81" cy="72" rx="9" ry="5" fill="#8fe8ff" opacity=".55" transform="rotate(-28 81 72)"/>
+<g fill="#e8f4ff">
+<ellipse cx="82" cy="92" rx="5" ry="7" transform="rotate(-7 82 92)"/>
+<ellipse cx="110" cy="92" rx="5" ry="7" transform="rotate(7 110 92)"/>
+</g>
+<path d="M48 99C70 124 122 124 144 99" fill="none" stroke="url(#rhea-192-ring)" stroke-width="7" stroke-linecap="round" transform="rotate(-18 96 99)"/>
+<path d="M53 97C73 116 120 117 139 100" fill="none" stroke="#8fe8ff" stroke-width="1.5" opacity=".75" transform="rotate(-18 96 99)"/>
+</svg>

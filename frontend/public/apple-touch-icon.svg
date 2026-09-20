@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+<defs>
+<radialGradient id="rhea-apple-body" cx="40%" cy="35%" r="68%">
+<stop offset="0" stop-color="#14f195"/>
+<stop offset=".55" stop-color="#9945ff"/>
+<stop offset="1" stop-color="#05060d"/>
+</radialGradient>
+<linearGradient id="rhea-apple-ring" x1="0" y1="0" x2="1" y2="0">
+<stop stop-color="#9945ff"/>
+<stop offset=".48" stop-color="#3fe0ff"/>
+<stop offset="1" stop-color="#14f195"/>
+</linearGradient>
+<filter id="rhea-apple-glow" x="-60%" y="-60%" width="220%" height="220%">
+<feGaussianBlur stdDeviation="7"/>
+</filter>
+<clipPath id="rhea-apple-clip"><circle cx="90" cy="88" r="41"/></clipPath>
+</defs>
+<rect width="180" height="180" fill="#05060d"/>
+<circle cx="90" cy="88" r="48" fill="#9945ff" opacity=".23" filter="url(#rhea-apple-glow)"/>
+<ellipse cx="90" cy="93" rx="64" ry="27" fill="none" stroke="url(#rhea-apple-ring)" stroke-width="7" transform="rotate(-18 90 93)"/>
+<circle cx="90" cy="88" r="41" fill="url(#rhea-apple-body)" stroke="#8fe8ff" stroke-width="2"/>
+<path d="M45 93C64 70 116 70 135 93" fill="none" stroke="#05060d" stroke-width="6" opacity=".44" transform="rotate(-18 90 93)" clip-path="url(#rhea-apple-clip)"/>
+<ellipse cx="76" cy="67" rx="9" ry="5" fill="#8fe8ff" opacity=".56" transform="rotate(-28 76 67)"/>
+<g fill="#e8f4ff">
+<ellipse cx="77" cy="87" rx="5" ry="7" transform="rotate(-7 77 87)"/>
+<ellipse cx="103" cy="87" rx="5" ry="7" transform="rotate(7 103 87)"/>
+</g>
+<path d="M44 93C65 117 115 117 136 93" fill="none" stroke="url(#rhea-apple-ring)" stroke-width="7" stroke-linecap="round" transform="rotate(-18 90 93)"/>
+<path d="M49 91C69 109 112 111 131 95" fill="none" stroke="#8fe8ff" stroke-width="1.5" opacity=".72" transform="rotate(-18 90 93)"/>
+</svg>
