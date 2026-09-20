@@ -1,6 +1,6 @@
 /* Client-side fetchers for the Rhea API. */
 import type {
-  Briefing, ChartHistory, ChartRange, Company, CorporateAction, DbcCurvePlan, DbcPlanInput, DbcPoolStatus, DbcPreset, EligibilityResult, MarketOverview, MarketSessionInfo, Portfolio, PriceSnapshot, PrivateMarketsOverview, ProofOfReserves, TokenizedAsset, TradeQuote, AssetCapability,
+  Briefing, ChartHistory, ChartRange, Company, CorporateAction, DbcCurvePlan, DbcPlanInput, DbcPoolStatus, DbcPreset, EligibilityResult, MarketOverview, MarketSessionInfo, NewsEvent, Portfolio, PriceSnapshot, PrivateMarketsOverview, ProofOfReserves, TokenizedAsset, TradeQuote, AssetCapability,
 } from "@shared/types";
 
 /* Where the API lives. Empty in local dev (Vite proxies /api → the backend);
@@ -91,4 +91,7 @@ export const api = {
     j<DbcCurvePlan>("/api/market/dbc/plan", { method: "POST", body: JSON.stringify(body) }),
   dbcPool: (address: string) => j<DbcPoolStatus>(`/api/market/dbc/pool/${encodeURIComponent(address)}`),
   streetViewUrl: (id: string) => apiUrl(`/api/market/streetview/${encodeURIComponent(id)}`),
+  /* Headline wire: recent stories for a query, up within a second of a focus (the voice model's picks replace them). */
+  news: (q: string) => j<{ items: NewsEvent[] }>(`/api/market/news?q=${encodeURIComponent(q)}`),
+  faviconUrl: (domain: string) => apiUrl(`/api/market/favicon?domain=${encodeURIComponent(domain)}`),
 };

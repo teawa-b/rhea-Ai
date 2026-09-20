@@ -56,13 +56,14 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const status = useMarket((s) => s.status);
   const setError = useMarket((s) => s.setError);
   const news = useWorld((s) => s.news);
+  const newsPending = useWorld((s) => s.newsPending);
   const impact = useWorld((s) => s.impact);
   const streetView = useWorld((s) => s.streetViewCompany);
   const showStreetView = useWorld((s) => s.showStreetView);
   const focusCountry = useWorld((s) => s.focusCountry);
   const clearResearch = useWorld((s) => s.clearResearch);
 
-  const [amount, setAmount] = useState(100);
+  const [amount, setAmount] = useState(1);
   const [trigger, setTrigger] = useState<{ price: string; amount: string }>({ price: "", amount: "100" });
   const [busy, setBusy] = useState<string | null>(null);
   const [svFailed, setSvFailed] = useState(false);
@@ -294,8 +295,12 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
         <div className="hint" style={{ marginBottom: 6 }}>TRADE · Jupiter · Solana</div>
         {!auth.authenticated ? <div className="hint">Not signed in — Buy opens sign-in. Research stays available.</div> : null}
         {detail && !tradable ? <div className="hint warn">Listed, but no onchain liquidity yet — trading disabled.</div> : null}
+        {/* Quick sizes first, then the field for anything else — the headset panel offers the same four. */}
         <div className="row" style={{ marginTop: 6 }}>
-          <input className="chip mono" type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 96 }} />
+          {[1, 5, 25, 100].map((v) => (
+            <button key={v} className={`chip${amount === v ? " on" : ""}`} onClick={() => setAmount(v)} disabled={!canTrade || busy != null}>${v}</button>
+          ))}
+          <input className="chip mono" type="number" min={1} step="any" value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 96 }} />
           <span className="hint">USDC</span>
           <button className="btn sol sm" disabled={!canTrade || busy != null} onClick={doBuy}>{busy === "buy" ? "Quoting…" : `Buy ${co.tokenSymbol}`}</button>
           <button className="btn danger sm" disabled={!canTrade || !pos || busy != null} onClick={doSell}>Sell all</button>
@@ -337,7 +342,8 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
 
         {/* News + impact */}
         {impact && impact.companyId === co.id ? (<><div className="divider" /><ImpactCard impact={impact} /></>) : null}
-        {companyNews.length ? (<><div className="divider" /><NewsCards items={companyNews} label={countryNews ? COUNTRIES[co.countryCode].name : co.ticker} /></>) : null}
+        {companyNews.length ? (<><div className="divider" /><NewsCards items={companyNews} label={countryNews ? COUNTRIES[co.countryCode].name : co.ticker} /></>)
+          : newsPending === co.name ? (<><div className="divider" /><div className="hint wire-wait"><i />Searching the wire for {co.ticker}…</div></>) : null}
       </div>
     </div>
   );

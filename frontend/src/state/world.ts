@@ -52,7 +52,10 @@ type WorldState = {
   chartMode: "line" | "candles";
   chartFocusTs: number | null;
   chartEvents: ChartEvent[];
-  news: { target: string; items: NewsEvent[] } | null;
+  /** `wire`: loaded by the app the moment a place was focused; the voice model's show_news replaces it. */
+  news: { target: string; items: NewsEvent[]; wire?: boolean } | null;
+  /** Target whose wire is being fetched (the panels show a searching line meanwhile). */
+  newsPending: string | null;
   impact: ImpactAnalysis | null;
   comparison: Comparison;
   streetViewCompany: string | null;
@@ -94,7 +97,8 @@ type WorldState = {
   setChartMode: (mode: "line" | "candles") => void;
   focusChartTimestamp: (ts: number | null) => void;
   addChartEvent: (ev: Omit<ChartEvent, "id">) => ChartEvent;
-  showNews: (target: string, items: NewsEvent[]) => void;
+  showNews: (target: string, items: NewsEvent[], wire?: boolean) => void;
+  setNewsPending: (target: string | null) => void;
   /** Take down the research trail (news + impact) with the panel it was raised
    *  for. `keepFor` spares news that is really about that country — closing a
    *  company panel drops back to its country, and the country briefing that led
@@ -148,6 +152,7 @@ export const useWorld = create<WorldState>((set, get) => ({
   chartFocusTs: null,
   chartEvents: [],
   news: null,
+  newsPending: null,
   impact: null,
   comparison: null,
   streetViewCompany: null,
@@ -257,6 +262,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       panelReady: true,
       panelOpen: false,
       news: null,
+      newsPending: null,
       impact: null,
       ...(clear ? { highlightedCountries: [], highlightedCompanies: [], connections: [], countryHeat: {}, chartEvents: [] } : {}),
       contextVersion: s.contextVersion + 1,
@@ -315,11 +321,16 @@ export const useWorld = create<WorldState>((set, get) => ({
     set((s) => ({ chartEvents: [...s.chartEvents.filter((e) => !(e.companyId === ev.companyId && Math.abs(e.timestamp - ev.timestamp) < 60_000 && e.title === ev.title)), full].slice(-20) }));
     return full;
   },
-  showNews: (target, items) => set((s) => ({ news: { target, items }, contextVersion: s.contextVersion + 1 })),
+  showNews: (target, items, wire) => set((s) => {
+    /* The wire never overwrites what the model chose to show for the same place. */
+    if (wire && s.news && !s.news.wire && s.news.target === target) return { newsPending: null };
+    return { news: { target, items, wire }, newsPending: null, contextVersion: s.contextVersion + 1 };
+  }),
+  setNewsPending: (target) => set({ newsPending: target }),
   clearResearch: (keepFor) => set((s) => {
     const aboutPlace = Boolean(keepFor && s.news
       && (s.news.target === COUNTRIES[keepFor].name || s.news.items.some((n) => n.countryCodes.includes(keepFor))));
-    return { impact: null, ...(aboutPlace ? {} : { news: null }), contextVersion: s.contextVersion + 1 };
+    return { impact: null, ...(aboutPlace ? {} : { news: null, newsPending: null }), contextVersion: s.contextVersion + 1 };
   }),
   showImpact: (impact) => set({ impact }),
   compareCompanies: (qs) => {
@@ -360,6 +371,6 @@ export function describeWorld(): string {
   if (!s.panelOpen && typeof window !== "undefined" && window.matchMedia("(max-width: 600px)").matches) {
     parts.push("On this phone the detail panel is collapsed to a peek bar at the bottom so the globe stays visible; the user can tap it to open the panel.");
   }
-  if (s.news) parts.push(`News cards shown for ${s.news.target}: ${s.news.items.slice(0, 3).map((n) => n.title).join(" | ")}.`);
+  if (s.news) parts.push(`${s.news.wire ? "Wire headlines already on screen" : "News cards shown"} for ${s.news.target}: ${s.news.items.slice(0, 3).map((n) => `${n.title} (${n.source})`).join(" | ")}.`);
   return parts.join(" ");
 }

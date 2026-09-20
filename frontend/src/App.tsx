@@ -13,6 +13,8 @@ import { rig } from "@/scene/rig";
 import { describeIntent, resumeIntent } from "@/solana/trade";
 import { demoRequested, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
+import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
+import { api } from "@/market/api";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { useGlobeGestures } from "@/ui/gestures";
 import { Hud } from "@/ui/Hud";
@@ -91,6 +93,33 @@ function IntentResumer() {
   return null;
 }
 
+/* Headline wire: the moment a company or country is focused, fetch recent
+ * stories for it so the panel has real news within a second. The voice
+ * model's web_search picks (show_news) still replace them when they land;
+ * the wire never overwrites those for the same place. */
+function NewsWire() {
+  const focusedCompany = useWorld((s) => s.focusedCompany);
+  const focusedCountry = useWorld((s) => s.focusedCountry);
+  useEffect(() => {
+    const w = useWorld.getState();
+    const co = focusedCompany ? COMPANY_BY_ID[focusedCompany] : null;
+    const cd = !co && focusedCountry ? COUNTRIES[focusedCountry] : null;
+    const name = co?.name ?? cd?.name;
+    if (!name) { if (w.newsPending) w.setNewsPending(null); return; }
+    if (w.news?.target === name) return;
+    let stale = false;
+    w.setNewsPending(name);
+    const q = co ? `${co.name} ${co.ticker} stock` : `${name} economy markets`;
+    api.news(q).then((r) => {
+      if (stale) return;
+      const items = r.items.map((n) => ({ ...n, companyIds: co ? [co.id] : [], countryCodes: [co?.countryCode ?? cd?.code].filter((c): c is NonNullable<typeof c> => Boolean(c)) }));
+      useWorld.getState().showNews(name, items, true);
+    }).catch(() => { if (!stale) useWorld.getState().setNewsPending(null); });
+    return () => { stale = true; };
+  }, [focusedCompany, focusedCountry]);
+  return null;
+}
+
 /* Headset: hide the DOM HUD while an immersive session is running (XRPanels
  * takes over) and switch the mic to hold-to-speak, so Rhea never hears room
  * noise and can be interrupted cleanly. Phone AR: the same HUD stays up,
@@ -151,6 +180,7 @@ export function App() {
       <div className={`app${cameraView ? " camera-view" : ""}`} ref={appRef}>
         <Boot />
         <IntentResumer />
+        <NewsWire />
         <CameraBackdrop />
         <ErrorBoundary><RheaScene /></ErrorBoundary>
         <HudGate />

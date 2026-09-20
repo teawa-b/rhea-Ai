@@ -330,6 +330,8 @@ export type NewsEvent = {
   title: string;
   source: string;
   url: string;
+  /** The publisher's site (for its favicon) when `url` is a redirect, e.g. a Google News link. */
+  sourceUrl?: string;
   publishedAt: string;      // ISO
   summary?: string;
 };
