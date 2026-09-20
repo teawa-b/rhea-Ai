@@ -6,21 +6,15 @@
 
 ## Project description
 
-## Why I built Rhea
+I am building **OtherChains**, a spatial Web3 venture within Shroozy Studios. I have always been interested in what happens when Web3 and virtual reality come together. Very few people seem to be building seriously in that space, especially onchain products that you can speak to, look at and move through.
 
-Following a market story usually means jumping between a news site, a chart and a trading app. Even then, you are left to work out how an event in one country might affect a company somewhere else.
+**Rhea is my first step towards bringing OtherChains to Solana.** Tokenized stocks felt like the right place to begin because markets are global, connected and naturally visual.
 
-I built **Rhea** because I wanted that process to feel more direct. Rhea is a spatial interface for tokenized stocks on Solana. You explore the market on a 3D globe and ask questions by voice. Ask what is happening in China and the globe moves there, showing the stocks and recent news. Ask how it could affect Nvidia and Rhea draws the link, takes you to the company and opens its chart.
+Rhea lets you explore tokenized stocks on a 3D globe and ask questions by voice. Ask what is happening in China and the globe moves there, showing the available stocks and recent news. Ask how it could affect Nvidia and Rhea draws the connection, takes you to the company and opens its chart.
 
-Rhea finds cited news, marks events on price charts and prepares swaps or conditional orders. Every trade stops at a preview so the user can check the details, confirm and sign with their own wallet.
+It brings cited news, price data and trading into the same experience. Rhea can prepare a swap or conditional order, but every trade stops at a preview for the user to check, confirm and sign with their own wallet. The project uses Jupiter for token discovery and trading, Solana RPC for portfolio data, and Pyth and Jupiter for market prices.
 
-## Why Solana
-
-Rhea finds the tokenized stocks currently available through Jupiter. It keeps the underlying share price separate from the price available onchain, and shows where each number came from and how recent it is. Trades go through **Jupiter Swap**, conditional orders use **Jupiter Trigger**, and portfolio balances come from Solana RPC.
-
-I am building **OtherChains** through Shroozy Studios. It is my spatial Web3 venture, focused on wallets, onchain agents and financial interfaces that you can speak to and see around you. Most of that work has been on Base. I was waiting for a Solana idea that made sense for the kind of interfaces I build, and tokenized stocks were it. They turn news, geography and markets into something that works naturally in a visual space.
-
-I plan to keep working on Rhea after Stocklana and enter it in **Colosseum's Crypto World's Fair**. That gives me a next deadline to improve the live experience, test the research-to-trade flow with more people and see whether Rhea can grow into a useful Solana product.
+Stocklana gave me the opportunity to turn this idea into a working product. I want Rhea to become one of the first OtherChains projects on Solana, and I plan to keep developing it for **Colosseum's Crypto World's Fair**. With the right support, I can take it beyond the hackathon, test it with more people and find out how far this kind of spatial market interface can go.
 
 ## Why Solana is fundamental
 - The assets are xStocks — tokenized equities that already trade on Solana (discovered live via Jupiter's Tokens API).
