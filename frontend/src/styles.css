@@ -91,6 +91,8 @@ a { color: var(--frost); }
 /* Smaller, lighter chip for status readouts and suggestion prompts. Same cut,
    tighter, so a row of them under the globe stays quiet. */
 .chip.pill { --cut: 4px; padding: 5px 11px; font-size: 11px; gap: 7px; }
+/* A chip acting as a choice (the quick buy amounts): the picked one lights green. */
+.chip.on { --edge: rgba(20,241,149,0.75); color: #fff; background: rgba(20,241,149,0.14); }
 .chip.green { --edge: rgba(20,241,149,0.42); }
 .chip.amber { --edge: rgba(255,178,32,0.48); }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 8px currentColor; }

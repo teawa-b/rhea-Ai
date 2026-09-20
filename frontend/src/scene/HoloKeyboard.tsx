@@ -136,9 +136,12 @@ export function HoloKeyboard({ y, onKey, onBackspace, onDone, doneLabel = "Done"
   );
 }
 
-/** Numpad for the six-digit code: 1-9, then delete / 0 / submit. */
-export function HoloNumpad({ y, onKey, onBackspace, onDone, doneLabel = "Sign in", doneEnabled }: {
+/** Numpad. Codes get 1-9 then delete / 0 / submit; amounts (`dot`) trade the in-grid
+ * submit for a decimal point and take a full-width confirm key underneath instead. */
+export function HoloNumpad({ y, onKey, onBackspace, onDone, doneLabel = "Sign in", doneEnabled, dot }: {
   y: number; onKey: (ch: string) => void; onBackspace: () => void; onDone: () => void; doneLabel?: string; doneEnabled: boolean;
+  /** Amount mode: adds "." and moves the confirm key below the pad, where it can carry a longer label. */
+  dot?: boolean;
 }) {
   const w = KEY_W * 1.25, stepX = w + GAP;
   return (
@@ -149,15 +152,23 @@ export function HoloNumpad({ y, onKey, onBackspace, onDone, doneLabel = "Sign in
           if (r < 3) { const d = String(r * 3 + c + 1); return <Key key={d} x={x} y={ky} w={w} label={d} mono onPress={() => onKey(d)} />; }
           if (c === 0) return <Key key="del" x={x} y={ky} w={w} label="DEL" onPress={onBackspace} accent={C.magenta} />;
           if (c === 1) return <Key key="0" x={x} y={ky} w={w} label="0" mono onPress={() => onKey("0")} />;
+          if (dot) return <Key key="dot" x={x} y={ky} w={w} label="." mono onPress={() => onKey(".")} accent={C.violet} />;
           return <Key key="go" x={x} y={ky} w={w} label="GO" onPress={() => { if (doneEnabled) onDone(); }}
             accent={doneEnabled ? C.solGreen : C.frost} ink={doneEnabled ? "#ffffff" : "#6f8196"} />;
         }),
       )}
+      {/* Amount mode: one wide key under the pad, so the confirm can say what it will do. */}
+      {dot ? (
+        <Key x={0} y={-4 * STEP_Y} w={w * 3 + GAP * 2} label={doneLabel} onPress={() => { if (doneEnabled) onDone(); }}
+          accent={doneEnabled ? C.solGreen : C.frost} ink={doneEnabled ? "#ffffff" : "#6f8196"} />
+      ) : null}
       {/* The submit key is narrow, so the action is spelled out beside the pad. */}
-      <Text font={FONT_BODY} position={[0, -4 * STEP_Y + 0.006, 0]} fontSize={0.018} color="#8ea3bd"
-        anchorX="center" anchorY="middle" raycast={NO_RAYCAST} {...OUTLINE}>
-        {doneEnabled ? `GO — ${doneLabel.toLowerCase()}` : "enter all six digits"}
-      </Text>
+      {dot ? null : (
+        <Text font={FONT_BODY} position={[0, -4 * STEP_Y + 0.006, 0]} fontSize={0.018} color="#8ea3bd"
+          anchorX="center" anchorY="middle" raycast={NO_RAYCAST} {...OUTLINE}>
+          {doneEnabled ? `GO — ${doneLabel.toLowerCase()}` : "enter all six digits"}
+        </Text>
+      )}
     </group>
   );
 }

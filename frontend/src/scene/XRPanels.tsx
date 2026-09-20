@@ -413,9 +413,12 @@ function CompanyHolo({ companyId }: { companyId: string }) {
       {/* Assistant buttons floating beneath */}
       <group position={[0, -0.46 + lift, 0.01]}>
         <HoloButton position={[-0.36, 0, 0]} w={0.2} icon={holding ? "dot" : undefined} label={holding ? "Listening" : voiceState === "connecting" ? "Connecting" : "Hold · Talk"} accent={holding ? C.violet : C.sol} active={holding} onHoldStart={() => setHold(true, auth)} onHoldEnd={() => setHold(false)} />
-        <HoloButton position={[-0.135, 0, 0]} w={0.2} label="Buy $100" accent={C.solGreen} disabled={!canTrade} onClick={() => void prepareTrade(auth, companyId, "buy", 100).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
-        <HoloButton position={[0.09, 0, 0]} w={0.2} label="Sell all" accent={C.magenta} disabled={!canTrade || !pos} onClick={() => pos && void prepareTrade(auth, companyId, "sell", pos.amountUi).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
-        <HoloButton position={[0.315, 0, 0]} w={0.2} label={triggerPrice ? `Buy < $${triggerPrice}` : "Trigger"} accent={C.amber} disabled={!canTrade || !triggerPrice} onClick={() => void prepareTrigger(auth, companyId, "buy_below", triggerPrice, 100).then((r) => { if (!r.ok) setError(r.error); })} />
+        {/* One tap to buy the smallest useful amount, and a keypad for anything else.
+            $1 is here because a demo should not start at $100 of someone's own money. */}
+        <HoloButton position={[-0.155, 0, 0]} w={0.15} label="Buy $1" accent={C.solGreen} disabled={!canTrade} onClick={() => void prepareTrade(auth, companyId, "buy", 1).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
+        <HoloButton position={[0.01, 0, 0]} w={0.17} label="Buy $…" accent={C.solGreen} disabled={!canTrade} onClick={() => useMarket.getState().setAmountPrompt({ companyId, side: "buy" })} />
+        <HoloButton position={[0.185, 0, 0]} w={0.16} label="Sell all" accent={C.magenta} disabled={!canTrade || !pos} onClick={() => pos && void prepareTrade(auth, companyId, "sell", pos.amountUi).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
+        <HoloButton position={[0.355, 0, 0]} w={0.17} label={triggerPrice ? `Buy < $${triggerPrice}` : "Trigger"} accent={C.amber} disabled={!canTrade || !triggerPrice} onClick={() => void prepareTrigger(auth, companyId, "buy_below", triggerPrice, 100).then((r) => { if (!r.ok) setError(r.error); })} />
       </group>
       <group position={[0, -0.545 + lift, 0.01]}>
         {/* Range pills only where a range means something. */}
@@ -623,6 +626,68 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
         );
       })}
       <HoloButton position={[0, pillY, 0.01]} w={0.22} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
+    </group>
+  );
+}
+
+/* ---------------- Amount keypad (in-headset) ----------------
+ * There is no DOM input in an immersive session, so "Buy $..." types the
+ * amount here instead. Quick chips cover the usual sizes; the pad covers the
+ * rest, decimals included. Confirming hands straight to prepareTrade, so the
+ * sign-in and funding gates still run exactly as they do everywhere else. */
+
+const QUICK_USD = [1, 5, 25, 100];
+
+function AmountHolo() {
+  const auth = useAuth();
+  const prompt = useMarket((s) => s.amountPrompt);
+  const setPrompt = useMarket((s) => s.setAmountPrompt);
+  const setError = useMarket((s) => s.setError);
+  const [raw, setRaw] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!prompt) return null;
+  const co = COMPANY_BY_ID[prompt.companyId];
+  const amount = Number(raw);
+  const valid = Number.isFinite(amount) && amount > 0;
+
+  const go = (usd: number) => {
+    if (!(usd > 0) || busy) return;
+    setBusy(true);
+    /* prepareTrade owns the gates: signed out opens the sign-in card, short of USDC opens funding. */
+    void prepareTrade(auth, prompt.companyId, prompt.side, usd)
+      .then((r) => { if (!r.ok && !isGated(r)) setError(r.error); setPrompt(null); })
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <group>
+      <Card w={0.96} h={0.86} accent={C.solGreen} />
+      <Label position={[-0.44, 0.36, 0.001]} text={`HOW MUCH ${co.tokenSymbol}?`} size={0.038} color="#ffffff" />
+      <Label position={[-0.44, 0.315, 0.001]} text={`${co.name} · spending USDC · Jupiter finds the route`} size={0.021} color="#b8c7da" maxWidth={0.88} />
+      <TypedLine y={0.235} w={0.88} text={raw ? `$${raw}` : ""} placeholder="$0" mono size={0.032} />
+      {/* Quick sizes, so the common cases never need the pad at all. */}
+      <group position={[0, 0.155, 0.002]}>
+        {QUICK_USD.map((v, i) => (
+          <HoloButton key={v} position={[(i - 1.5) * 0.19, 0, 0]} w={0.17} label={`$${v}`} accent={C.frost}
+            disabled={busy} onClick={() => setRaw(String(v))} />
+        ))}
+      </group>
+      <HoloNumpad
+        y={0.065}
+        dot
+        onKey={(ch) => setRaw((v) => {
+          if (ch === "." && v.includes(".")) return v;          /* one decimal point only */
+          if (ch === "." && !v) return "0.";                    /* ".5" reads better as "0.5" */
+          const next = v + ch;
+          return /^\d{0,7}(\.\d{0,2})?$/.test(next) ? next : v; /* cents, not fractions of one */
+        })}
+        onBackspace={() => setRaw((v) => v.slice(0, -1))}
+        onDone={() => go(amount)}
+        doneLabel={valid ? `Buy $${raw} of ${co.tokenSymbol}` : "Enter an amount"}
+        doneEnabled={valid && !busy}
+      />
+      <HoloButton position={[0, -0.335, 0.002]} w={0.26} icon="back" label="Back" accent={C.frost} disabled={busy}
+        onClick={() => setPrompt(null)} />
     </group>
   );
 }
@@ -1005,12 +1070,13 @@ export function XRPanels() {
   const pendingOrder = useMarket((s) => s.pendingOrder);
   const loginPrompt = useMarket((s) => s.loginPrompt);
   const depositPrompt = useMarket((s) => s.depositPrompt);
+  const amountPrompt = useMarket((s) => s.amountPrompt);
   if (mode == null || handheld) return null;
   return (
     <group>
       <group position={CLUSTER_POS} rotation={CLUSTER_ROT}>
-        <Rise id={pendingTrade ? `trade:${pendingTrade.id}` : pendingOrder ? `order:${pendingOrder.id}` : depositPrompt ? "deposit" : loginPrompt ? "login" : focusedCompany ? `co:${focusedCompany}` : focusedCountry ? `cc:${focusedCountry}` : "idle"}>
-          {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : depositPrompt ? <DepositHolo /> : loginPrompt ? <LoginHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
+        <Rise id={pendingTrade ? `trade:${pendingTrade.id}` : pendingOrder ? `order:${pendingOrder.id}` : depositPrompt ? "deposit" : loginPrompt ? "login" : amountPrompt ? `amt:${amountPrompt.companyId}` : focusedCompany ? `co:${focusedCompany}` : focusedCountry ? `cc:${focusedCountry}` : "idle"}>
+          {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : depositPrompt ? <DepositHolo /> : loginPrompt ? <LoginHolo /> : amountPrompt ? <AmountHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
         </Rise>
         {/* News belongs under the panel, and only while one of the browse panels is up. */}
         {!pendingTrade && !pendingOrder && !depositPrompt && !loginPrompt ? <NewsTicker /> : null}

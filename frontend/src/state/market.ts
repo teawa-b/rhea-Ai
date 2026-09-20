@@ -22,6 +22,8 @@ export type PendingIntent =
 /** `after`: what Rhea should do once the user is in, for non-trade requests (e.g. "show_holdings"). */
 export type LoginPrompt = { reason: string; resume?: PendingIntent; after?: string };
 export type DepositPrompt = { neededUsd: number; haveUsd: number; resume?: PendingIntent };
+/** "How much?" keypad, opened by the Buy $... button in the headset where there is no DOM input. */
+export type AmountPrompt = { companyId: string; side: "buy" | "sell" };
 
 type MarketState = {
   status: ServerStatus | null;
@@ -46,6 +48,8 @@ type MarketState = {
   loginPrompt: LoginPrompt | null;
   /** "Fund your wallet" panel, opened when a buy needs more USDC than the wallet holds. */
   depositPrompt: DepositPrompt | null;
+  /** In-headset amount keypad; null when no one is typing an amount. */
+  amountPrompt: AmountPrompt | null;
   lastError: string | null;
   /** US session + "Solana: open" for the HUD pill (GET /api/market/session, polled by startSessionPolling). */
   session: MarketSessionInfo | null;
@@ -68,6 +72,7 @@ type MarketState = {
   setPendingOrder: (o: AgentRule | null, mode?: "place" | "cancel") => void;
   setLoginPrompt: (p: LoginPrompt | null) => void;
   setDepositPrompt: (p: DepositPrompt | null) => void;
+  setAmountPrompt: (p: AmountPrompt | null) => void;
   recordTrade: (t: TradeIntent) => void;
   upsertOrder: (o: AgentRule) => void;
   /** Replace `wallet`'s list with a fresh Jupiter sync (ignored if the user has switched wallets meanwhile). */
@@ -157,6 +162,7 @@ export const useMarket = create<MarketState>((set, get) => ({
   pendingOrderMode: "place",
   loginPrompt: null,
   depositPrompt: null,
+  amountPrompt: null,
   lastError: null,
   session: null,
   briefing: null,
@@ -228,6 +234,7 @@ export const useMarket = create<MarketState>((set, get) => ({
   setPendingOrder: (pendingOrder, mode = "place") => set({ pendingOrder, pendingOrderMode: mode }),
   setLoginPrompt: (loginPrompt) => set({ loginPrompt }),
   setDepositPrompt: (depositPrompt) => set({ depositPrompt }),
+  setAmountPrompt: (amountPrompt) => set({ amountPrompt }),
   recordTrade: (t) => set((s) => ({ trades: [t, ...s.trades.filter((x) => x.id !== t.id)].slice(0, 50) })),
   upsertOrder: (o) => set((s) => {
     /* Filed under the order's own wallet; only the signed-in wallet's orders are in view. */
