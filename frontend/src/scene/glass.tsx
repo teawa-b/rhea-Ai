@@ -22,12 +22,20 @@ const FRAG = /* glsl */ `
   uniform vec2 uSize; uniform float uRadius; uniform float uStroke; uniform float uPad;
   uniform vec3 uTop; uniform vec3 uBottom; uniform vec3 uAccent;
   uniform float uFill; uniform float uRim; uniform float uGlow; uniform float uSheen;
-  uniform float uBar; uniform vec3 uBarGeo; uniform float uTopBar; uniform float uOpacity;
+  uniform float uBar; uniform vec3 uBarGeo; uniform float uTopBar; uniform float uOpacity; uniform float uChamfer;
   varying vec2 vP;
 
   float sdRound(vec2 p, vec2 b, float r) {
     vec2 q = abs(p) - b + r;
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  }
+  /* The app's corner cut (--btn-cut in the DOM): a 45 degree slice of size c
+     off each corner, the same shape the CSS clip-path draws. */
+  float sdShape(vec2 p, vec2 b, float r, float c) {
+    float d = sdRound(p, b, r);
+    if (c <= 0.0) return d;
+    vec2 a = abs(p);
+    return max(d, (a.x + a.y - (b.x + b.y - c)) * 0.70710678);
   }
   float band(float d, float aa) { return 1.0 - smoothstep(-aa, aa, d); }
   /* premultiplied "over" */
@@ -35,16 +43,17 @@ const FRAG = /* glsl */ `
 
   void main() {
     vec2 hs = uSize * 0.5;
-    float d = sdRound(vP, hs, uRadius);
+    float d = sdShape(vP, hs, uRadius, uChamfer);
     float aa = max(fwidth(d), 1e-5);
     float inside = band(d, aa);
+    float corner = max(uRadius, uChamfer);
 
     float gy = clamp(vP.y / uSize.y + 0.5, 0.0, 1.0);
     vec4 c = vec4(mix(uBottom, uTop, gy) * inside * uFill, inside * uFill);
 
     if (uSheen > 0.0) {
       float s = band(abs(vP.y - (hs.y - min(0.009, hs.y * 0.3))) - 0.002, aa)
-              * band(abs(vP.x) - (uSize.x - uRadius) * 0.5, aa);
+              * band(abs(vP.x) - (uSize.x - corner) * 0.5, aa);
       c = over(c, vec3(1.0), s * inside * uSheen);
     }
     if (uBar > 0.0) {
@@ -92,6 +101,7 @@ function makeGlass(): GlassMaterial {
       uTop: { value: new THREE.Color() }, uBottom: { value: new THREE.Color() }, uAccent: { value: new THREE.Color() },
       uFill: { value: 0.8 }, uRim: { value: 0 }, uGlow: { value: 0 }, uSheen: { value: 0 },
       uBar: { value: 0 }, uBarGeo: { value: new THREE.Vector3(0.012, 0.0025, 0.01) }, uTopBar: { value: 0 }, uOpacity: { value: 1 },
+      uChamfer: { value: 0 },
     },
     transparent: true,
     premultipliedAlpha: true,
@@ -104,6 +114,8 @@ export type GlassProps = {
   w: number; h: number;
   /** corner radius (clamped to half the short side) */
   r?: number;
+  /** 45° corner cut, the app's chamfer (see --btn-cut). Combines with `r`; use one or the other. */
+  chamfer?: number;
   /** room around the shape for the glow, each side */
   pad?: number;
   /** fill gradient top/bottom (bottom defaults to top) */
@@ -131,6 +143,7 @@ export const GlassRect = forwardRef<GlassMaterial, GlassProps>(function GlassRec
     u.uQuad.value.set(p.w + pad * 2, p.h + pad * 2);
     u.uSize.value.set(p.w, p.h);
     u.uRadius.value = Math.min(p.r ?? 0, p.w / 2, p.h / 2);
+    u.uChamfer.value = Math.min(p.chamfer ?? 0, p.w / 2, p.h / 2);
     u.uPad.value = pad;
     u.uStroke.value = p.stroke ?? 0.002;
     u.uTop.value.set(p.top);
