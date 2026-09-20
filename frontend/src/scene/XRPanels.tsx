@@ -331,24 +331,27 @@ function Row({ y, label, value, color = "#ffffff", w = 0.76 }: { y: number; labe
   );
 }
 
-/* Privy's signing prompt (showWalletUIs) is a DOM modal, which an immersive
- * session hides — the same reason LoginHolo ends the session. So while
- * immersive, holo confirm/cancel buttons never reach Privy: the first press
- * explains and tells Rhea; a second press exits to the flat page, where the
- * same panel is waiting to sign. */
-const HANDOFF = "Confirm on your phone or desktop";
+/* Privy's embedded wallet signs silently while immersive (Auth passes
+ * showWalletUIs: false), so the holo card is the confirmation and a press on
+ * Confirm signs right here. An external wallet (Phantom, Solflare…) needs its
+ * own popup, which an immersive session hides: the first press explains, a
+ * second press exits to the flat page where the same panel is waiting. */
+const HANDOFF = "Your wallet app can't open in Mixed Reality";
 function useSignHandoff(id: string | undefined) {
+  const auth = useAuth();
   const inXR = useXR((s) => s.mode) != null;
   const session = useXR((s) => s.session);
   const announce = useVoice((s) => s.announce);
   const [shownFor, setShownFor] = useState<string | null>(null);
   const shown = id != null && shownFor === id;
+  /** True when the press must be handed off rather than signed here. */
+  const needed = inXR && !auth.embedded;
   const handoff = (what: string) => {
     if (shown) { void session?.end().catch(() => undefined); return; }
     setShownFor(id ?? null);
-    announce(`The user pressed a headset button to ${what}. Wallet signing can't be shown inside Mixed Reality, so nothing was signed. Tell them: "${HANDOFF}." Pressing the button again exits Mixed Reality, and the same panel is waiting on the page to sign.`);
+    announce(`The user pressed a headset button to ${what}. Their external wallet app can't open inside Mixed Reality, so nothing was signed. Tell them: "${HANDOFF} — press again to exit and approve on the page." The same panel is waiting on the page.`);
   };
-  return { inXR, shown, handoff, text: HANDOFF };
+  return { needed, shown, handoff, text: HANDOFF };
 }
 
 function TradeHolo() {
@@ -357,6 +360,7 @@ function TradeHolo() {
   const setPending = useMarket((s) => s.setPendingTrade);
   const announce = useVoice((s) => s.announce);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const sign = useSignHandoff(pending?.id);
   if (!pending?.quote) return null;
   const q = pending.quote; const co = COMPANY_BY_ID[pending.companyId];
@@ -386,14 +390,15 @@ function TradeHolo() {
           {pending.signature ? <Row y={-0.09} label="Signature" value={shortSig(pending.signature, 10)} color={C.solGreen} /> : null}
         </group>
       )}
-      {sign.shown ? <Label position={[-0.38, -0.14, 0.001]} text={`${sign.text}. Press again to exit Mixed Reality — this trade waits on the page.`} size={0.021} color={C.amber} maxWidth={0.76} />
+      {sign.shown ? <Label position={[-0.38, -0.14, 0.001]} text={`${sign.text}. Press again to exit and approve on the page — this trade waits there.`} size={0.021} color={C.amber} maxWidth={0.76} />
         : err || pending.error ? <Label position={[-0.38, -0.14, 0.001]} text={err ?? pending.error ?? ""} size={0.021} color={C.magenta} maxWidth={0.76} /> : null}
-      <Pill position={[-0.19, -0.24, 0.002]} w={0.24} label={pending.status === "confirmed" || pending.status === "failed" ? "Close" : "Cancel"} accent={C.frost} onClick={() => setPending(null)} />
+      <Pill position={[-0.19, -0.24, 0.002]} w={0.24} label={pending.status === "confirmed" || pending.status === "failed" ? "Close" : "Cancel"} accent={C.frost} disabled={busy} onClick={() => setPending(null)} />
       {pending.status === "awaiting_confirmation" || pending.status === "failed" ? (
-        <Pill position={[0.19, -0.24, 0.002]} w={0.24} label={sign.shown ? "Exit to sign" : "Confirm"} accent={C.solGreen} onClick={() => {
+        <Pill position={[0.19, -0.24, 0.002]} w={0.24} label={sign.shown ? "Exit to sign" : busy ? "Signing…" : "Confirm"} accent={C.solGreen} disabled={busy} onClick={() => {
           setErr(null);
-          if (sign.inXR) { sign.handoff(`confirm the ${pending.side} of ${co.tokenSymbol}`); return; }
-          void confirmTrade(auth, pending).then((d) => announce(tradeConfirmedAnnouncement(d))).catch((e: Error) => setErr(e.message));
+          if (sign.needed) { sign.handoff(`confirm the ${pending.side} of ${co.tokenSymbol}`); return; }
+          setBusy(true);
+          void confirmTrade(auth, pending).then((d) => announce(tradeConfirmedAnnouncement(d))).catch((e: Error) => setErr(e.message)).finally(() => setBusy(false));
         }} />
       ) : null}
     </group>
@@ -430,14 +435,14 @@ function OrderHolo() {
       <Row y={0.04} label="Held by" value={pending.simulated ? (import.meta.env.PROD ? "Unavailable right now" : "Dev only · local, not on Jupiter") : held ? "Jupiter, not Rhea · your Jupiter order vault" : "—"} color={held ? C.gold : "#ffffff"} />
       {pending.jupiterOrderId ? <Row y={-0.01} label="Jupiter order" value={shortSig(pending.jupiterOrderId)} /> : null}
       {tx ? <Row y={-0.06} label={tx.label} value={shortSig(tx.sig, 12)} color={C.solGreen} /> : null}
-      {sign.shown ? <Label position={[-0.38, -0.13, 0.001]} text={`${sign.text}. Press again to exit Mixed Reality — this order waits on the page.`} size={0.021} color={C.amber} maxWidth={0.76} />
+      {sign.shown ? <Label position={[-0.38, -0.13, 0.001]} text={`${sign.text}. Press again to exit and approve on the page — this order waits there.`} size={0.021} color={C.amber} maxWidth={0.76} />
         : err ? <Label position={[-0.38, -0.13, 0.001]} text={err} size={0.021} color={C.magenta} maxWidth={0.76} /> : null}
       <Pill position={[-0.19, -0.27, 0.002]} w={0.24} label={canPlace ? "Not now" : canCancel ? (withdrawOnly ? "Later" : "Keep order") : "Close"} accent={C.frost} disabled={busy} onClick={() => setPending(null)} />
       {canPlace || canCancel ? (
         <Pill position={[0.19, -0.27, 0.002]} w={0.24} label={sign.shown ? "Exit to sign" : busy ? "Signing…" : isCancel ? (withdrawOnly ? "Withdraw" : "Cancel order") : "Confirm"} accent={isCancel ? C.magenta : C.amber} disabled={busy} onClick={() => {
           setErr(null);
-          /* The immersive guard runs before anything that could open Privy (JWT signMessage included). */
-          if (sign.inXR) { sign.handoff(isCancel ? `${withdrawOnly ? "withdraw the funds of" : "cancel"} the limit order on ${co.name}` : `place the limit order on ${co.name}`); return; }
+          /* External wallets only: the guard runs before anything that could open their popup (JWT signMessage included). */
+          if (sign.needed) { sign.handoff(isCancel ? `${withdrawOnly ? "withdraw the funds of" : "cancel"} the limit order on ${co.name}` : `place the limit order on ${co.name}`); return; }
           setBusy(true);
           const run = isCancel
             ? cancelTrigger(auth, pending).then((d) => announce(cancelAnnouncement(d)))

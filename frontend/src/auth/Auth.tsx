@@ -10,6 +10,7 @@ import { PrivyProvider, usePrivy, useLogin, useLogout } from "@privy-io/react-au
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { toSolanaWalletConnectors, useSignMessage, useSignTransaction, useWallets, type ConnectedStandardSolanaWallet } from "@privy-io/react-auth/solana";
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { xrStore } from "@/scene/xrStore";
 import { useMarket } from "@/state/market";
 
 export type RheaAuth = {
@@ -18,6 +19,8 @@ export type RheaAuth = {
   authenticated: boolean;
   displayName: string | null;
   address: string | null;
+  /** True when the signer is Privy's embedded wallet, which can sign without any DOM prompt (see signTransaction). */
+  embedded: boolean;
   login: () => void;
   logout: () => Promise<void>;
   signTransaction: (tx: Uint8Array) => Promise<Uint8Array>;
@@ -30,6 +33,7 @@ const GUEST: RheaAuth = {
   authenticated: false,
   displayName: null,
   address: null,
+  embedded: false,
   login: () => alert("Set VITE_PRIVY_APP_ID to enable sign-in and the embedded Solana wallet."),
   logout: async () => undefined,
   signTransaction: async () => { throw new Error("Sign in to trade"); },
@@ -58,6 +62,13 @@ const SOLANA_RPCS = {
   },
 } as const;
 
+/* Privy's confirm screen is a DOM modal, and an immersive WebXR session hides the DOM (the
+ * headset ignores dom-overlay). The embedded wallet doesn't need that screen: it signs over
+ * postMessage, so while immersive the holo card that already lists spend / receive / route /
+ * fees is the confirmation and Privy is told to stay quiet. On the flat page the modal stays
+ * as a second look. External wallets keep their own popup, which XRPanels hands off for. */
+const walletUi = (embedded: boolean) => ({ showWalletUIs: !(embedded && xrStore.getState().mode != null) });
+
 function PrivyBridge({ children }: { children: ReactNode }) {
   const { ready, authenticated, user } = usePrivy();
   const { login } = useLogin();
@@ -82,6 +93,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
     else if (!m.demoMode) setWallet(null);
   }, [authenticated, address, setWallet]);
 
+  const embedded = wallet?.standardWallet?.name === "Privy";
   const displayName = user?.google?.name ?? user?.email?.address ?? user?.google?.email ?? (address ? `${address.slice(0, 4)}…${address.slice(-4)}` : null);
 
   const value = useMemo<RheaAuth>(() => ({
@@ -90,19 +102,20 @@ function PrivyBridge({ children }: { children: ReactNode }) {
     authenticated,
     displayName,
     address,
+    embedded,
     login: () => login({ loginMethods: ["google", "email", "wallet"] }),
     logout: async () => { await logout(); },
     signTransaction: async (tx) => {
       if (!wallet) throw new Error("No Solana wallet available — sign in first");
-      const { signedTransaction } = await signTransaction({ transaction: tx, wallet, chain: "solana:mainnet" });
+      const { signedTransaction } = await signTransaction({ transaction: tx, wallet, chain: "solana:mainnet", options: { uiOptions: walletUi(embedded) } });
       return signedTransaction;
     },
     signMessage: async (msg) => {
       if (!wallet) throw new Error("No Solana wallet available — sign in first");
-      const { signature } = await signMessage({ message: msg, wallet });
+      const { signature } = await signMessage({ message: msg, wallet, options: { uiOptions: walletUi(embedded) } });
       return signature;
     },
-  }), [ready, authenticated, displayName, address, wallet, login, logout, signTransaction, signMessage]);
+  }), [ready, authenticated, displayName, address, embedded, wallet, login, logout, signTransaction, signMessage]);
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
