@@ -40,3 +40,38 @@ export function GlobeIcon({ size }: P) {
     </svg>
   );
 }
+
+/** Handheld AR: a phone with a small cube floating in its view. */
+export function ArIcon({ size }: P) {
+  return (
+    <svg {...base(size)}>
+      <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+      <path d="M10.5 18.5h3" />
+      <path d="M12 7.2l3 1.6v3.4l-3 1.6-3-1.6V8.8z" />
+      <path d="M9 8.8l3 1.6 3-1.6M12 10.4v3.4" />
+    </svg>
+  );
+}
+
+/** Re-seat the globe in front of the phone. */
+export function RecenterIcon({ size }: P) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+    </svg>
+  );
+}
+
+export function CopyIcon({ size }: P) {
+  return (
+    <svg {...base(size)}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+    </svg>
+  );
+}
+
+export function CheckIcon({ size }: P) {
+  return <svg {...base(size)}><path d="M4 12.5l5 5L20 6.5" /></svg>;
+}

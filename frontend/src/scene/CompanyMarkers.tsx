@@ -18,6 +18,10 @@ import { DIST, rig } from "./rig";
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+/* Most towers a country view will draw before it stops being readable.
+ * Heroes are never dropped; this only caps the long tail. */
+const MAX_COUNTRY_TOWERS = 14;
+
 type Placed = { co: Company; mode: "hero" | "minor"; lat: number; lng: number };
 
 /* Companies sharing a metro (Bay Area, Beijing, Central HK…) would stack on
@@ -99,7 +103,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
   return (
     <group ref={rootRef} position={pos} quaternion={quat}>
       {/* spire: a thin luminous column with a soft additive sheath */}
-      <mesh ref={towerRef} position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id); }}>
+      <mesh ref={towerRef} position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id, "user"); }}>
         <cylinderGeometry args={[0.005, 0.009, height, 8]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
@@ -141,7 +145,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
         </group>
       ) : null}
       {/* hit target */}
-      <mesh position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id); }}>
+      <mesh position={[0, height / 2, 0]} onClick={(e) => { e.stopPropagation(); focusCompany(co.id, "user"); }}>
         <sphereGeometry args={[0.07, 8, 6]} />
         <meshBasicMaterial visible={false} />
       </mesh>
@@ -153,7 +157,7 @@ function Tower({ co, mode, lat, lng }: Placed) {
           subtitle={activeOrders.length ? `LIMIT ORDER · JUPITER · ${sub}` : sub}
           accent={activeOrders.length ? C.amber : accent}
           scale={labelScale}
-          onClick={() => focusCompany(co.id)}
+          onClick={() => focusCompany(co.id, "user")}
         />
       ) : null}
     </group>
@@ -186,10 +190,31 @@ export function CompanyMarkers() {
     for (const o of orders) if (o.status === "active") ids.add(o.companyId);
     if (focusedCompany) ids.add(focusedCompany);
     const list = [...ids].map((id) => COMPANY_BY_ID[id]).filter(Boolean);
-    /* In country view show every company with HQ; hero = featured or focused. */
-    const placed = list.map((co) => ({ co, mode: (co.featured || co.id === focusedCompany || highlighted.includes(co.id)) ? "hero" as const : "minor" as const }));
-    /* Quest draw-call budget: skip minor towers inside a headset session. */
-    return spreadClusters(inXR ? placed.filter((p) => p.mode === "hero") : placed);
+    /* A tower is a "hero" when it is the reason you are looking: featured,
+     * focused, highlighted by the AI, compared, or carrying an open order. */
+    const pinned = new Set<string>([
+      ...highlighted,
+      ...(comparison?.companyIds ?? []),
+      ...orders.filter((o) => o.status === "active").map((o) => o.companyId),
+      ...(focusedCompany ? [focusedCompany] : []),
+    ]);
+    const placed = list.map((co) => ({
+      co,
+      mode: (co.featured || pinned.has(co.id)) ? "hero" as const : "minor" as const,
+    }));
+
+    /* Thin the minor towers. The US lists forty-odd companies, and drawing them
+     * all turned the country into overlapping markers that hid the ones worth
+     * looking at. Heroes always render; the rest fill up to the cap, deepest
+     * liquidity first, and the full list stays available in the country panel. */
+    const heroes = placed.filter((p) => p.mode === "hero");
+    if (inXR) return spreadClusters(heroes); // Quest draw-call budget
+    const liquidity = new Map(overview.assets.map((a) => [a.companyId, a.liquidityUsd ?? 0]));
+    const minors = placed
+      .filter((p) => p.mode === "minor")
+      .sort((a, b) => (liquidity.get(b.co.id) ?? 0) - (liquidity.get(a.co.id) ?? 0))
+      .slice(0, Math.max(0, MAX_COUNTRY_TOWERS - heroes.length));
+    return spreadClusters([...heroes, ...minors]);
   }, [view, focusedCountry, focusedCompany, highlighted, comparison, overview, orders, inXR]);
 
   /* Keep chips live: poll prices for visible companies. */

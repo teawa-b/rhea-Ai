@@ -6,8 +6,10 @@ import { useAuth } from "@/auth/Auth";
 import { openSignInTab } from "@/auth/signinTab";
 import { useVoice } from "@/ai/voice";
 import { useMarket } from "@/state/market";
+import { leaveHandheldForDom } from "@/scene/handheld";
 import { cancelAnnouncement, cancelTrigger, confirmTrade, confirmTrigger, describeIntent, describeRule, feeSummary, orderStatusLabel, tradeConfirmedAnnouncement } from "@/solana/trade";
 import { fmtAge, fmtEt, fmtSeconds, fmtUsd, sessionLabel, shortSig, solscanTx } from "@/theme";
+import { AddressBlock } from "./CopyAddress";
 
 const TxLink = ({ sig }: { sig: string }) => <a href={solscanTx(sig)} target="_blank" rel="noreferrer" title={sig}>{shortSig(sig)} ↗</a>;
 
@@ -41,6 +43,8 @@ export function TradePanel() {
   const onConfirm = async () => {
     setErr(null);
     try {
+      /* Privy's signing prompt is a DOM modal a phone AR session would hide. */
+      await leaveHandheldForDom();
       const done = await confirmTrade(auth, pending);
       announce(tradeConfirmedAnnouncement(done));
     } catch (e) {
@@ -114,6 +118,7 @@ export function OrderPanel() {
   const onConfirm = async () => {
     setBusy(true); setErr(null);
     try {
+      await leaveHandheldForDom();
       if (isCancel) {
         announce(cancelAnnouncement(await cancelTrigger(auth, pending)));
         return;
@@ -196,7 +201,7 @@ export function LoginPanel() {
         </p>
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn ghost" onClick={() => setPrompt(null)}>Later</button>
-          <button className="btn primary" onClick={() => { if (auth.mode === "guest") auth.login(); else openSignInTab(auth); }} disabled={!auth.ready} title="Opens sign-in in a new tab">{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in ↗"}</button>
+          <button className="btn primary" onClick={() => { void leaveHandheldForDom().then(() => { if (auth.mode === "guest") auth.login(); else openSignInTab(auth); }); }} disabled={!auth.ready} title="Opens sign-in in a new tab">{auth.mode === "guest" ? "Sign in (needs Privy)" : "Sign in ↗"}</button>
         </div>
       </div>
     </div>
@@ -209,31 +214,29 @@ export function DepositPanel() {
   const setPrompt = useMarket((s) => s.setDepositPrompt);
   const loadPortfolio = useMarket((s) => s.loadPortfolio);
   const portfolio = useMarket((s) => s.portfolio);
-  const [copied, setCopied] = useState(false);
   const [checking, setChecking] = useState(false);
   if (!prompt) return null;
   const have = portfolio?.usdcBalance ?? prompt.haveUsd;
   const missing = Math.max(0, prompt.neededUsd - have);
-  const copy = () => { if (auth.address) void navigator.clipboard?.writeText(auth.address).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); };
+  /* No amount attached: the user asked to see the address, not a blocked trade. */
+  const receiveOnly = prompt.neededUsd <= 0;
   return (
     <div className="panel clickable">
       <div className="panel-head">
-        <div><h2>Fund your wallet</h2><div className="sub">USDC on Solana · {fmtUsd(missing)} more needed</div></div>
+        <div><h2>{receiveOnly ? "Receive USDC" : "Fund your wallet"}</h2><div className="sub">USDC on Solana{receiveOnly ? "" : ` · ${fmtUsd(missing)} more needed`}</div></div>
         <button className="btn ghost sm" onClick={() => setPrompt(null)} aria-label="Close">✕</button>
       </div>
       <div className="panel-body">
         <dl className="kv">
           <dt>Wallet USDC</dt><dd>{fmtUsd(have)}</dd>
-          <dt>This trade needs</dt><dd>{fmtUsd(prompt.neededUsd)}</dd>
+          {receiveOnly ? null : <><dt>This trade needs</dt><dd>{fmtUsd(prompt.neededUsd)}</dd></>}
         </dl>
         <div className="divider" />
-        <div className="hint">SEND USDC (SOLANA) TO</div>
-        <div className="mono" style={{ fontSize: 12, wordBreak: "break-all", margin: "6px 0 10px", color: "#e8f4ff" }}>{auth.address ?? "—"}</div>
-        <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-          <button className="btn sm" onClick={copy}>{copied ? "Copied" : "Copy address"}</button>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ minWidth: 0, flex: "1 1 220px" }}><AddressBlock address={auth.address} hint="SEND USDC (SOLANA) TO" /></div>
           <div className="row">
-            <button className="btn ghost sm" onClick={() => setPrompt(null)}>Later</button>
-            <button className="btn primary sm" disabled={checking} onClick={() => { setChecking(true); void loadPortfolio().finally(() => setChecking(false)); }}>{checking ? "Checking…" : "I've sent it"}</button>
+            <button className="btn ghost sm" onClick={() => setPrompt(null)}>{receiveOnly ? "Done" : "Later"}</button>
+            <button className="btn primary sm" disabled={checking} onClick={() => { setChecking(true); void loadPortfolio().finally(() => setChecking(false)); }}>{checking ? "Checking…" : receiveOnly ? "Refresh balance" : "I've sent it"}</button>
           </div>
         </div>
         <div className="hint" style={{ marginTop: 10 }}>

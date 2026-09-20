@@ -5,13 +5,17 @@ import { COMPANY_BY_ID, COUNTRIES } from "@shared/registry";
 import { useAuth } from "@/auth/Auth";
 import { useVoice } from "@/ai/voice";
 import { VERIFIED_ON_MAINNET } from "@/demo/verified";
+import { enterHandheld, exitHandheld, recenterHandheld, useHandheld } from "@/scene/handheld";
 import { DEMO_WALLET, sessionPill, startSessionPolling, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { fmtEt, fmtPct, fmtUsd, solscanTx } from "@/theme";
 import { CompanyPanel } from "./CompanyPanel";
+import { DbcStudioPanel } from "./DbcStudioPanel";
+import { PrivateMarketsPanel } from "./PrivateMarketsPanel";
 import { CoLogo } from "./CoLogo";
+import { CopyAddress } from "./CopyAddress";
 import { CountryPanel } from "./CountryPanel";
-import { ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon } from "./icons";
+import { ArIcon, ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon, RecenterIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
 import { RegionPanel } from "./RegionPanel";
 import { REGION_BY_ID } from "@/state/regions";
@@ -48,7 +52,7 @@ function SessionPill() {
   if (!session) return null;
   const pill = sessionPill(session, now);
   return (
-    <span className="chip" role="status" title="xStocks trade 24/5 on Solana through Jupiter; the US regular session is 09:30–16:00 ET" style={{ alignSelf: "flex-start", maxWidth: "100%", padding: "5px 11px", borderRadius: 999, fontSize: 11, gap: 7, borderColor: pill.open ? "rgba(20,241,149,0.4)" : "rgba(255,178,32,0.4)" }}>
+    <span className={`chip pill ${pill.open ? "green" : "amber"}`} role="status" title="xStocks trade 24/5 on Solana through Jupiter; the US regular session is 09:30–16:00 ET" style={{ alignSelf: "flex-start", maxWidth: "100%" }}>
       <i className={`dot ${pill.open ? "on" : "warn"}`} style={{ width: 7, height: 7 }} />
       <span className="long">{pill.long}</span>
       <span className="short">{pill.short}</span>
@@ -63,7 +67,7 @@ function VerifiedOnMainnet() {
   if (!VERIFIED_ON_MAINNET.length) return null;
   return (
     <div className="clickable" style={{ alignSelf: "flex-start", maxWidth: "100%" }}>
-      <button type="button" className="chip" aria-expanded={open} onClick={() => setOpen(!open)} style={{ cursor: "pointer", padding: "5px 11px", borderRadius: 999, fontSize: 11, gap: 7, borderColor: "rgba(20,241,149,0.4)" }}>
+      <button type="button" className="chip pill green" aria-expanded={open} onClick={() => setOpen(!open)} style={{ cursor: "pointer" }}>
         <i className="dot on" style={{ width: 7, height: 7 }} />Verified on mainnet ({VERIFIED_ON_MAINNET.length}) ↗
       </button>
       {open ? (
@@ -85,7 +89,15 @@ function VerifiedOnMainnet() {
 function useNarrow() {
   const q = "(max-width: 600px)";
   const [narrow, setNarrow] = useState(() => window.matchMedia(q).matches);
-  useEffect(() => { const mq = window.matchMedia(q); const on = () => setNarrow(mq.matches); mq.addEventListener("change", on); return () => mq.removeEventListener("change", on); }, []);
+  /* Also on resize: rotating a phone fires the media query, but a desktop
+   * window dragged across the breakpoint does not always. */
+  useEffect(() => {
+    const mq = window.matchMedia(q);
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener("change", on);
+    window.addEventListener("resize", on);
+    return () => { mq.removeEventListener("change", on); window.removeEventListener("resize", on); };
+  }, []);
   return narrow;
 }
 
@@ -93,6 +105,24 @@ function useNarrow() {
 const SUGGESTIONS = ["What changed while the market was closed?", "Why is Nvidia moving?"];
 
 const STATE_LABEL: Record<string, string> = { off: "Tap to talk to Rhea", connecting: "Connecting…", idle: "Listening", listening: "Hearing you…", thinking: "Researching…", speaking: "Speaking", error: "Voice error" };
+
+/* One line naming whatever the panel would have shown, for the collapsed peek bar. */
+function peekTitle(a: {
+  focusedCompany: string | null; focusedCountry: string | null; focusedRegion: string | null;
+  comparison: { companyIds: string[] } | null; showPortfolio: boolean; demoMode: boolean;
+  privateMarkets: boolean; dbcStudio: string | null;
+  newsTarget: string | null; heat: boolean;
+}): string {
+  if (a.showPortfolio) return a.demoMode ? "Demo portfolio" : "Portfolio";
+  if (a.privateMarkets) return "Pre-IPO markets";
+  if (a.dbcStudio != null) { const co = a.dbcStudio ? COMPANY_BY_ID[a.dbcStudio] : null; return co ? `Curve studio · ${co.name}` : "Curve studio"; }
+  if (a.comparison) return `Compare ${a.comparison.companyIds.length} companies`;
+  if (a.focusedCompany) { const co = COMPANY_BY_ID[a.focusedCompany]; return co ? `${co.name} · ${co.ticker}` : "Company"; }
+  if (a.focusedCountry) return COUNTRIES[a.focusedCountry as keyof typeof COUNTRIES]?.name ?? "Country";
+  if (a.focusedRegion) return REGION_BY_ID[a.focusedRegion]?.name ?? "Region";
+  if (a.heat) return "Portfolio geography";
+  return a.newsTarget ?? "Research";
+}
 
 export function Hud() {
   const auth = useAuth();
@@ -120,9 +150,15 @@ export function Hud() {
   const focusCompany = useWorld((s) => s.focusCompany);
   const focusCountry = useWorld((s) => s.focusCountry);
   const panelReady = useWorld((s) => s.panelReady);
+  const panelOpen = useWorld((s) => s.panelOpen);
+  const setPanelOpen = useWorld((s) => s.setPanelOpen);
   /* The portfolio panel rides along with the holdings planet. */
   const showPortfolio = useWorld((s) => s.vault);
   const showHoldings = useWorld((s) => s.showHoldings);
+  const privateMarkets = useWorld((s) => s.privateMarkets);
+  const showPrivateMarkets = useWorld((s) => s.showPrivateMarkets);
+  const dbcStudio = useWorld((s) => s.dbcStudio);
+  const showDbcStudio = useWorld((s) => s.showDbcStudio);
 
   const voiceState = useVoice((s) => s.state);
   const inputMode = useVoice((s) => s.inputMode);
@@ -142,6 +178,12 @@ export function Hud() {
   const [text, setText] = useState("");
   const narrow = useNarrow();
   const showCrumbs = view !== "world" || Boolean(comparison) || showPortfolio;
+  /* Phone AR. `ar` is the running mode; `arSupport` decides whether the button exists at all (never on desktop). */
+  const ar = useHandheld((s) => s.active);
+  const arSupport = useHandheld((s) => s.support);
+  const arEntering = useHandheld((s) => s.entering);
+  const arGyro = useHandheld((s) => s.gyro);
+  const arTracked = ar === "webxr" || (ar === "camera" && arGyro);
   const [xrMode, setXrMode] = useState<"immersive-ar" | "immersive-vr" | null>(null);
   const capRef = useRef<HTMLDivElement>(null);
 
@@ -191,13 +233,34 @@ export function Hud() {
   /* A focused place's panel waits until the camera has arrived (panelReady). */
   const placePanel = panelReady && (focusedCompany || focusedCountry || focusedRegion);
   const gatePanel = !pendingTrade && !pendingOrder && (depositPrompt || loginPrompt);
-  const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
-  const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry); else resetGlobe(false); };
+  /* Counted apart on purpose. A PreStock tracks a private company that no
+   * exchange lists, so it does not belong in a "tokenized stocks" total — the
+   * same distinction the panels and the voice prompt hold to. */
+  const listedCount = overview?.assets.filter((a) => a.issuerKey !== "prestocks").length ?? 0;
+  const preIpoCount = overview?.assets.filter((a) => a.issuerKey === "prestocks").length ?? 0;
+
+  const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || privateMarkets || dbcStudio != null || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
+  const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry, "user"); else resetGlobe(false); };
+  /* Trades, orders and the sign-in / deposit gates are things the user must act
+   * on, so they always open. Everything else is browsing: on a phone it waits
+   * behind a peek bar unless the user asked for it by tapping. */
+  const mustAct = Boolean(pendingTrade || pendingOrder || gatePanel);
+  const collapsed = narrow && Boolean(showPanel) && !mustAct && !panelOpen;
   const heatEntries = Object.entries(countryHeat).filter(([, v]) => (v ?? 0) > 0).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
 
   return (
-    <div className="hud">
+    <div className={`hud${ar ? " ar" : ""}`}>
       {/* ---------- top bar ---------- */}
+      {ar ? (
+        /* AR: the brand, market chip and account row step aside; one slim bar with the way out (and recenter on tracked devices). */
+        <div className="arbar">
+          <button className="btn sm ar-exit" onClick={exitHandheld} title="Back to the flat view"><ChevronLeftIcon size={14} />Exit AR</button>
+          <span className="chip dim ar-mode" title={ar === "webxr" ? "Tracked AR: tap a surface to place the globe, then walk around it" : arGyro ? "Tap to move the globe; it stays put as you turn (position isn't tracked without WebXR)" : "Camera view: no motion sensor, the globe follows the phone"}>
+            <i className={`dot ${arTracked ? "on" : "warn"}`} />{ar === "webxr" ? "AR" : arGyro ? "AR · gyro" : "Camera view"}
+          </span>
+          {arTracked ? <button className="btn ghost sm" onClick={() => { resetGlobe(false); recenterHandheld(); }} title="Put the globe back in front of you" aria-label="Recenter"><RecenterIcon size={15} /></button> : null}
+        </div>
+      ) : (
       <div className="topbar">
         <div className="brand">
           <div className="brand-mark"><Logo /></div>
@@ -208,15 +271,22 @@ export function Hud() {
             <SolanaMark />
             {overview ? (
               <>
-                <span className="long">{overview.assets.length} tokenized stocks · {overview.countries.length} countries · Solana</span>
-                <span className="short">{overview.assets.length} stocks · {overview.countries.length} countries</span>
+                <span className="long">{listedCount} tokenized stocks{preIpoCount ? ` · ${preIpoCount} pre-IPO` : ""} · {overview.countries.length} countries · Solana</span>
+                <span className="short">{listedCount} stocks{preIpoCount ? ` · ${preIpoCount} pre-IPO` : ""} · {overview.countries.length} countries</span>
               </>
             ) : "loading market…"}
           </span>
           {status && !status.openai ? <span className="chip dim" title="Set OPENAI_API_KEY on the server"><i className="dot err" />voice offline</span> : null}
+          <button
+            className={`chip clickable${privateMarkets ? " sol" : ""}`}
+            onClick={() => (privateMarkets ? showPrivateMarkets(false) : showPrivateMarkets(true, "user"))}
+            title="Pre-IPO companies: what the issuer marks them at, and what the onchain market pays"
+          >
+            Pre-IPO
+          </button>
           {auth.authenticated ? (
             <>
-              <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings())} title={showPortfolio ? "Back to Earth" : "Fly to your holdings"}>
+              <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings("user"))} title={showPortfolio ? "Back to Earth" : "Fly to your holdings"}>
                 <i className="dot on" />{portfolio ? fmtUsd(portfolio.totalValueUsd) : "…"} · {auth.displayName}
               </button>
               <button className="btn ghost sm" onClick={() => void auth.logout()}>Sign out</button>
@@ -224,7 +294,7 @@ export function Hud() {
           ) : (
             <>
               {demoMode ? (
-                <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings())} title={`Public demo wallet ${DEMO_WALLET?.slice(0, 4)}…${DEMO_WALLET?.slice(-4)}. Read-only: sign in to trade your own wallet.`} style={{ borderColor: "rgba(255,178,32,0.5)" }}>
+                <button className="chip clickable amber" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings("user"))} title={`Public demo wallet ${DEMO_WALLET?.slice(0, 4)}…${DEMO_WALLET?.slice(-4)}. Read-only: sign in to trade your own wallet.`} >
                   <i className="dot warn" />Demo portfolio · read-only{portfolio ? ` · ${fmtUsd(portfolio.totalValueUsd)}` : ""}
                 </button>
               ) : null}
@@ -233,35 +303,43 @@ export function Hud() {
           )}
         </div>
       </div>
+      )}
 
-      {xrMode ? <XrLaunch mode={xrMode} /> : null}
+      {xrMode && !ar ? <XrLaunch mode={xrMode} /> : null}
 
       {/* ---------- stage ---------- */}
       <div className={`stage ${showPanel ? "" : "no-panel"}`}>
         <div className="left">
           {/* Phones: the rising panel covers the second row, so the trail wins there (the panel repeats the session). */}
-          {!(narrow && showCrumbs) ? <SessionPill /> : null}
-          {!(narrow && showCrumbs) ? <VerifiedOnMainnet /> : null}
+          {!(narrow && showCrumbs) && !ar ? <SessionPill /> : null}
+          {!(narrow && showCrumbs) && !ar ? <VerifiedOnMainnet /> : null}
           {showCrumbs ? (
             <nav className="crumbs clickable" aria-label="Where you are">
               <button className="crumb-back" onClick={goBack} title="Back" aria-label="Back"><ChevronLeftIcon size={16} /></button>
               <button className="crumb" onClick={() => resetGlobe(false)}><GlobeIcon size={14} />World</button>
-              {focusedRegion ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">{REGION_BY_ID[focusedRegion]?.name}</span></>) : null}
+              {focusedRegion ? (<><span className="crumb-sep mid" aria-hidden>›</span><span className={`crumb ${focusedCountry ? "mid" : "current"}`} aria-current={focusedCountry ? undefined : "page"}>{REGION_BY_ID[focusedRegion]?.name}</span></>) : null}
               {focusedCountry ? (
                 <>
-                  <span className="crumb-sep" aria-hidden>›</span>
+                  <span className={`crumb-sep${focusedCompany ? " mid" : ""}`} aria-hidden>›</span>
                   {focusedCompany
-                    ? <button className="crumb" onClick={() => focusCountry(focusedCountry)}>{COUNTRIES[focusedCountry].name}</button>
+                    ? <button className="crumb mid" onClick={() => focusCountry(focusedCountry, "user")}>{COUNTRIES[focusedCountry].name}</button>
                     : <span className="crumb current" aria-current="page">{COUNTRIES[focusedCountry].name}</span>}
                 </>
               ) : null}
               {focusedCompany ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">{COMPANY_BY_ID[focusedCompany]?.name}</span></>) : null}
               {comparison ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Compare</span></>) : null}
               {showPortfolio ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">Holdings</span></>) : null}
+              {collapsed ? <button type="button" className="crumb details" onClick={() => setPanelOpen(true)} aria-expanded={false}>Details <span aria-hidden>⌃</span></button> : null}
             </nav>
+          ) : collapsed ? (
+            /* No trail to hang it on (news, exposure heat, pre-IPO, curve studio): a pill of its own, same size. */
+            <button type="button" className="crumbs peek clickable" onClick={() => setPanelOpen(true)} aria-expanded={false}>
+              <span className="crumb current">{peekTitle({ focusedCompany, focusedCountry, focusedRegion, comparison, showPortfolio, demoMode, privateMarkets, dbcStudio, newsTarget: news?.target ?? null, heat: heatEntries.length > 0 })}</span>
+              <span className="crumb details">Details <span aria-hidden>⌃</span></span>
+            </button>
           ) : null}
-          <div className="captions scroll" ref={capRef} style={{ maxHeight: "34vh" }}>
-            {captions.map((c) => (
+          <div className="captions scroll" ref={capRef} style={{ maxHeight: narrow ? (ar ? "16vh" : "20vh") : "34vh" }}>
+            {(narrow ? captions.slice(-2) : captions).map((c) => (
               <div key={c.id} className={`caption ${c.role}`}>
                 <span className="who">{c.role === "user" ? "You" : "Rhea"}</span>
                 {c.text}
@@ -270,16 +348,19 @@ export function Hud() {
           </div>
           {!captions.length ? (
             <div className="row clickable" style={{ gap: 6, flexWrap: "wrap" }}>
-              {showDemoChip ? <button type="button" className="chip" onClick={hearDemo} title="A public wallet's real portfolio, read-only, no sign-in" style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 11.5, whiteSpace: "normal", textAlign: "left", borderColor: "rgba(20,241,149,0.45)" }}>▶ Hear the demo portfolio briefing</button> : null}
+              {showDemoChip ? <button type="button" className="chip pill green" onClick={hearDemo} title="A public wallet's real portfolio, read-only, no sign-in" style={{ cursor: "pointer", whiteSpace: "normal", textAlign: "left" }}>▶ Hear the demo portfolio briefing</button> : null}
               {SUGGESTIONS.map((q) => (
-                <button key={q} type="button" className="chip" onClick={() => sendText(q, auth)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 11.5, whiteSpace: "normal", textAlign: "left" }}>{q}</button>
+                <button key={q} type="button" className="chip pill" onClick={() => sendText(q, auth)} style={{ cursor: "pointer", whiteSpace: "normal", textAlign: "left" }}>{q}</button>
               ))}
             </div>
           ) : null}
         </div>
 
-        {showPanel ? (
+        {showPanel && !collapsed ? (
           <div className="right">
+            {narrow && !mustAct ? (
+              <button type="button" className="peek-collapse clickable" onClick={() => setPanelOpen(false)} title="Hide panel" aria-label="Hide panel"><span className="peek-grip" aria-hidden /></button>
+            ) : null}
             {pendingTrade ? <TradePanel /> : null}
             {pendingOrder ? <OrderPanel /> : null}
             {gatePanel ? (depositPrompt ? <DepositPanel /> : <LoginPanel />) : null}
@@ -292,7 +373,7 @@ export function Hud() {
                     {comparison.companyIds.map((id) => {
                       const co = COMPANY_BY_ID[id]; const p = prices[id]; const ch = p?.change24hPct ?? null;
                       return (
-                        <div key={id} className="item" onClick={() => focusCompany(id)}>
+                        <div key={id} className="item" onClick={() => focusCompany(id, "user")}>
                           <CoLogo id={id} />
                           <div className="grow"><div className="name">{co.name} <span className="muted">{co.ticker}</span></div><div className="meta">{co.sector} · {COUNTRIES[co.countryCode].name}</div></div>
                           <div style={{ textAlign: "right" }}><div className="mono">{fmtUsd(p?.tokenPriceUsd)}</div><div className={`mono ${ch == null ? "" : ch >= 0 ? "pos" : "neg"}`} style={{ fontSize: 11 }}>{fmtPct(ch)}</div><div className="hint">stock {fmtUsd(p?.underlyingPriceUsd)}</div></div>
@@ -303,10 +384,12 @@ export function Hud() {
                 </div>
               </div>
             ) : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && panelReady && focusedRegion ? <RegionPanel key={focusedRegion} id={focusedRegion} /> : null}
-            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !focusedCompany && !focusedCountry && !focusedRegion && (news || impact || heatEntries.length) ? (
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && privateMarkets ? <PrivateMarketsPanel /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !privateMarkets && dbcStudio != null ? <DbcStudioPanel companyId={dbcStudio} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && panelReady && focusedCompany ? <CompanyPanel key={focusedCompany} companyId={focusedCompany} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && panelReady && !focusedCompany && focusedCountry ? <CountryPanel key={focusedCountry} code={focusedCountry} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && panelReady && focusedRegion ? <RegionPanel key={focusedRegion} id={focusedRegion} /> : null}
+            {!pendingTrade && !pendingOrder && !gatePanel && !showPortfolio && !comparison && !privateMarkets && dbcStudio == null && !focusedCompany && !focusedCountry && !focusedRegion && (news || impact || heatEntries.length) ? (
               <div className="panel clickable">
                 <div className="panel-head"><div><h2>{heatEntries.length ? "Portfolio geography" : news?.target ?? "Research"}</h2><div className="sub">{heatEntries.length ? "exposure by country" : "sources"}</div></div><button className="btn ghost sm" onClick={() => resetGlobe(true)}>✕</button></div>
                 <div className="panel-body scroll">
@@ -331,9 +414,14 @@ export function Hud() {
             {voiceSub}
           </div>
           {voiceState !== "off" && voiceState !== "connecting" ? <button className="btn ghost sm" onClick={disconnect}>End</button> : null}
+          {arSupport && !ar ? (
+            <button className="btn ghost sm ar-btn" onClick={() => void enterHandheld()} disabled={arEntering} title={arSupport === "webxr" ? "Put the globe in your room (AR)" : "Show the globe over your camera"} aria-label="Enter AR">
+              <ArIcon size={16} />{arEntering ? "Starting…" : "AR"}
+            </button>
+          ) : null}
         </div>
         <form className="row clickable ask" onSubmit={(e) => { e.preventDefault(); const q = text.trim(); if (!q) return; sendText(q, auth); setText(""); }}>
-          <input className="chip ask-input" placeholder={`Ask Rhea… e.g. "Why is Nvidia moving?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />
+          <input className="chip ask-input" placeholder={narrow ? (live ? `${voiceTitle}… or type` : "Ask Rhea…") : `Ask Rhea… e.g. "Why is Nvidia moving?"`} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" />
           <button className="btn sm" type="submit">Ask</button>
         </form>
       </div>
@@ -354,6 +442,7 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
   /* The store wallet, not auth.address: in ?demo=1 it is the read-only demo wallet. */
   const wallet = useMarket((s) => s.wallet);
   const demoMode = useMarket((s) => s.demoMode);
+  const setDepositPrompt = useMarket((s) => s.setDepositPrompt);
   useEffect(() => { void loadPortfolio(); }, [loadPortfolio]);
   const byCountry = new Map<string, number>();
   for (const p of portfolio?.positions ?? []) { const cc = COMPANY_BY_ID[p.companyId].countryCode; byCountry.set(cc, (byCountry.get(cc) ?? 0) + (p.valueUsd ?? 0)); }
@@ -361,7 +450,9 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
   return (
     <div className="panel clickable">
       <div className="panel-head">
-        <div><h2>{demoMode ? "Demo portfolio" : "Portfolio"}</h2><div className="sub">{wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-6)}` : ""} · Solana{demoMode ? " · read-only" : ""}</div></div>
+        <div style={{ minWidth: 0 }}><h2>{demoMode ? "Demo portfolio" : "Portfolio"}</h2>
+          <div className="sub">{wallet ? <CopyAddress address={wallet} label={demoMode ? "Public demo wallet" : "Your Solana wallet"} /> : null} · Solana{demoMode ? " · read-only" : ""}</div>
+        </div>
         <div className="row"><button className="btn ghost sm" onClick={() => { setCountryHeat(Object.fromEntries([...byCountry].map(([k, v]) => [k, v / total]))); useWorld.getState().resetGlobe(false); }}>Show on Earth</button><button className="btn ghost sm" onClick={onClose}>✕</button></div>
       </div>
       <div className="panel-body scroll">
@@ -370,10 +461,15 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
           <dt>USDC</dt><dd>{fmtUsd(portfolio?.usdcBalance)}</dd>
           <dt>SOL</dt><dd>{portfolio?.solBalance.toFixed(4) ?? "—"}</dd>
         </dl>
+        {!demoMode && wallet ? (
+          <div className="row" style={{ marginTop: 10 }}>
+            <button className="btn ghost sm" onClick={() => setDepositPrompt({ neededUsd: 0, haveUsd: portfolio?.usdcBalance ?? 0 })} title="Show the wallet address to send USDC to">Deposit USDC</button>
+          </div>
+        ) : null}
         <div className="divider" />
         <div className="list">
           {(portfolio?.positions ?? []).map((p) => (
-            <div key={p.mint} className="item" onClick={() => focusCompany(p.companyId)}>
+            <div key={p.mint} className="item" onClick={() => focusCompany(p.companyId, "user")}>
               <CoLogo id={p.companyId} />
               <div className="grow"><div className="name">{COMPANY_BY_ID[p.companyId].name}</div><div className="meta">{p.amountUi.toFixed(4)} {p.symbol}</div></div>
               <div className="mono">{fmtUsd(p.valueUsd)}</div>

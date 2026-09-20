@@ -1,6 +1,6 @@
 /* Client-side fetchers for the Rhea API. */
 import type {
-  Briefing, ChartHistory, ChartRange, Company, CorporateAction, EligibilityResult, MarketOverview, MarketSessionInfo, Portfolio, PriceSnapshot, ProofOfReserves, TokenizedAsset, TradeQuote, AssetCapability,
+  Briefing, ChartHistory, ChartRange, Company, CorporateAction, DbcCurvePlan, DbcPlanInput, DbcPoolStatus, DbcPreset, EligibilityResult, MarketOverview, MarketSessionInfo, Portfolio, PriceSnapshot, PrivateMarketsOverview, ProofOfReserves, TokenizedAsset, TradeQuote, AssetCapability,
 } from "@shared/types";
 
 /* Where the API lives. Empty in local dev (Vite proxies /api → the backend);
@@ -29,8 +29,24 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type ServerStatus = { openai: boolean; jupiterKey: boolean; pythKey: boolean; streetView: boolean; rpc: string; liveModel: string; backendModel: string };
-/* reserves: xStocks proof of reserves; null (or absent on an older backend) when the issuer API didn't answer. */
-export type CompanyDetail = { company: Company; asset: TokenizedAsset | null; price: PriceSnapshot; corporateActions: CorporateAction[]; capability: AssetCapability | null; reserves?: ProofOfReserves | null };
+/** One tokenized wrapper of a company, priced on its own terms. A company can
+ *  have more than one if two issuers wrap the same exposure. */
+export type CompanyWrapperDetail = {
+  asset: TokenizedAsset;
+  price: PriceSnapshot;
+  capability: AssetCapability;
+  disclosure: string;
+  disclosureUrl: string;
+};
+export type CompanyDetail = {
+  company: Company; asset: TokenizedAsset | null; price: PriceSnapshot; corporateActions: CorporateAction[];
+  capability: AssetCapability | null;
+  /** xStocks proof of reserves; null (or absent on an older backend) when the issuer API didn't answer. */
+  reserves?: ProofOfReserves | null;
+  disclosure?: string; disclosureUrl?: string;
+  /** Absent on an older backend; treat as just the primary wrapper. */
+  wrappers?: CompanyWrapperDetail[];
+};
 export type PriceLite = { tokenPriceUsd: number | null; underlyingPriceUsd: number | null; change24hPct: number | null; updatedAt: string };
 
 export type TriggerStep = "challenge" | "verify" | "vault" | "deposit" | "order" | "cancel" | "confirm-cancel" | "history";
@@ -66,5 +82,13 @@ export const api = {
    * A thrown error carries .status (401 = JWT expired or invalid: trade.ts drops its cached token). */
   trigger: (step: TriggerStep, body: unknown, jwt?: string) =>
     j<Record<string, unknown>>(`/api/market/trigger/${step}`, { method: "POST", body: JSON.stringify(body ?? {}), headers: jwt ? { "x-trigger-jwt": jwt } : {} }),
+  /* Private (pre-IPO) markets: PreStocks, their issuer marks and what
+   * the onchain market pays over them. */
+  privateMarkets: () => j<PrivateMarketsOverview>("/api/market/private"),
+  /* Meteora DBC studio — all read-only. */
+  dbcPresets: () => j<{ presets: DbcPreset[]; default: string }>("/api/market/dbc/presets"),
+  dbcPlan: (body: Partial<DbcPlanInput> & { companyId?: string }) =>
+    j<DbcCurvePlan>("/api/market/dbc/plan", { method: "POST", body: JSON.stringify(body) }),
+  dbcPool: (address: string) => j<DbcPoolStatus>(`/api/market/dbc/pool/${encodeURIComponent(address)}`),
   streetViewUrl: (id: string) => apiUrl(`/api/market/streetview/${encodeURIComponent(id)}`),
 };

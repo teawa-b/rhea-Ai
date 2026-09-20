@@ -2,10 +2,11 @@
  * execution, and the Trigger V2 proxy. Keyless requests go to lite-api.jup.ag;
  * with JUPITER_API_KEY we use api.jup.ag (Swap V2, stocks tag, Trigger). */
 import {
-  COMPANIES, COMPANY_BY_TOKEN, MIN_TRADABLE_LIQUIDITY_USD, SOL_MINT, TRIGGER_MIN_ORDER_USD, USDC_MINT,
-  effectiveUiMultiplier, rawToUiAmount, uiToRawAmount,
+  COMPANIES, COMPANY_BY_TOKEN, MIN_TRADABLE_LIQUIDITY_USD, PRESTOCKS_ISSUER, SOL_MINT, TRIGGER_MIN_ORDER_USD, USDC_MINT,
+  assetIdFor, effectiveUiMultiplier, rawToUiAmount, uiToRawAmount,
 } from "../shared/registry";
-import type { TokenizedAsset, TradeQuote, TradeSide } from "../shared/types";
+import type { Company, IssuerKey, TokenizedAsset, TradeQuote, TradeSide } from "../shared/types";
+import { preStocksCatalog } from "./prestocks";
 
 const API_KEY = process.env.JUPITER_API_KEY || "";
 const KEYED = "https://api.jup.ag";
@@ -136,6 +137,20 @@ type JupToken = {
   tags?: string[];
 };
 
+const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+/* xStocks mint at 8 decimals, PreStocks at 9. Overridden by whatever
+ * Jupiter Price v3 reports for the mint. */
+const DEFAULT_DECIMALS: Record<IssuerKey, number> = { xstocks: 8, prestocks: 9 };
+const issuerName = (k: IssuerKey) => (k === "prestocks" ? PRESTOCKS_ISSUER : "xStocks (Backed)");
+const issuerLabel = (k: IssuerKey) => (k === "prestocks" ? "PreStock" : "xStock");
+
+/** One tokenized wrapper of one company, before it is priced. */
+type WrapperRef = {
+  company: Company; issuerKey: IssuerKey; primary: boolean; mint: string;
+  symbol: string; name: string; icon?: string; decimals?: number;
+  tokenProgram?: string; holderCount?: number; liquidity?: number;
+};
+
 let assetCache: { at: number; assets: TokenizedAsset[] } | null = null;
 const ASSET_TTL_MS = 10 * 60_000;
 
@@ -146,24 +161,72 @@ const ASSET_TTL_MS = 10 * 60_000;
 export async function listTokenizedAssets(force = false): Promise<TokenizedAsset[]> {
   if (!force && assetCache && Date.now() - assetCache.at < ASSET_TTL_MS) return assetCache.assets;
 
-  const found = new Map<string, JupToken>();
+  /* Every wrapper we might place on the globe, keyed by mint so two issuers of
+   * the same company never collide. */
+  const refs = new Map<string, WrapperRef>();
+  const addRef = (r: WrapperRef) => { if (r.mint) refs.set(r.mint, { ...refs.get(r.mint), ...r }); };
+
+  for (const co of COMPANIES) {
+    if (co.seedMint) {
+      addRef({
+        company: co, issuerKey: co.issuerKey ?? "xstocks", primary: true, mint: co.seedMint,
+        symbol: co.tokenSymbol, name: `${co.name} ${issuerLabel(co.issuerKey ?? "xstocks")}`,
+        icon: co.icon, decimals: DEFAULT_DECIMALS[co.issuerKey ?? "xstocks"], tokenProgram: TOKEN_2022,
+      });
+    }
+    for (const w of co.wrappers ?? []) {
+      addRef({
+        company: co, issuerKey: w.issuerKey, primary: false, mint: w.mint,
+        symbol: w.tokenSymbol, name: `${co.name} ${issuerLabel(w.issuerKey)}`,
+        decimals: DEFAULT_DECIMALS[w.issuerKey], tokenProgram: TOKEN_2022,
+      });
+    }
+  }
+
+  /* Live issuer catalogs refresh the seeds: mints, symbols and which markets
+   * exist all come from the issuer, never from a constant in this repo. */
+  const preStocks = await preStocksCatalog().catch(() => null);
+  if (preStocks) {
+    for (const t of preStocks) {
+      const co = COMPANY_BY_TOKEN[t.symbol.toUpperCase()];
+      if (!co) continue;
+      const primary = (co.issuerKey ?? "xstocks") === "prestocks";
+      /* A refreshed mint supersedes the seed for the same company+issuer. */
+      for (const [mint, r] of refs) if (r.company.id === co.id && r.issuerKey === "prestocks" && mint !== t.mint) refs.delete(mint);
+      addRef({
+        company: co, issuerKey: "prestocks", primary, mint: t.mint,
+        symbol: t.symbol, name: t.name, icon: t.image, decimals: 9, tokenProgram: TOKEN_2022,
+      });
+    }
+  }
+
+  /* With a key, the `stocks` tag refreshes xStocks metadata and finds listings
+   * that are not yet in the bundled catalog. */
   if (API_KEY) {
     try {
       const list = await getPublicJson<JupToken[]>(`/tokens/v2/tag?query=stocks`);
-      if (Array.isArray(list)) for (const t of list) found.set(t.symbol.toUpperCase(), t);
+      if (Array.isArray(list)) {
+        for (const t of list) {
+          const co = COMPANY_BY_TOKEN[t.symbol.toUpperCase()];
+          if (!co) continue;
+          const existing = refs.get(t.id);
+          addRef({
+            company: co,
+            issuerKey: existing?.issuerKey ?? co.issuerKey ?? "xstocks",
+            primary: existing?.primary ?? co.tokenSymbol.toUpperCase() === t.symbol.toUpperCase(),
+            mint: t.id, symbol: t.symbol, name: t.name, icon: t.icon,
+            decimals: t.decimals, tokenProgram: t.tokenProgram, holderCount: t.holderCount,
+            liquidity: t.liquidity,
+          });
+        }
+      }
     } catch (e) {
       console.warn("[jupiter] stocks tag failed, using seeds:", (e as Error).message);
     }
   }
-  for (const co of COMPANIES) {
-    const sym = co.tokenSymbol.toUpperCase();
-    if (co.seedMint && !found.has(sym)) {
-      found.set(sym, { id: co.seedMint, name: `${co.name} xStock`, symbol: co.tokenSymbol, icon: co.icon, decimals: 8, tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", tags: ["xstocks", "stocks"] });
-    }
-  }
 
   /* Batched price calls tell us which listings actually have liquidity. */
-  const mints = [...found.values()].map((t) => t.id);
+  const mints = [...refs.keys()];
   let prices: Record<string, JupPrice> = {};
   try { prices = await getPrices(mints); }
   catch (e) { console.warn("[jupiter] price batch failed:", (e as Error).message); }
@@ -175,27 +238,27 @@ export async function listTokenizedAssets(force = false): Promise<TokenizedAsset
   }
 
   const assets: TokenizedAsset[] = [];
-  for (const [sym, t] of found) {
-    const company = COMPANY_BY_TOKEN[sym];
-    if (!company) continue; // only surface assets we can place on the globe
-    const p = prices[t.id];
-    const liquidity = p?.liquidity ?? t.liquidity ?? 0;
-    const price = p?.usdPrice ?? t.usdPrice ?? 0;
+  for (const [mint, r] of refs) {
+    const p = prices[mint];
+    const liquidity = p?.liquidity ?? r.liquidity ?? 0;
+    const price = p?.usdPrice ?? 0;
     assets.push({
-      id: `${company.id}:solana`,
-      companyId: company.id,
+      id: assetIdFor(r.company.id, r.issuerKey, r.primary),
+      companyId: r.company.id,
+      issuerKey: r.issuerKey,
+      primary: r.primary,
       chain: "solana",
-      mint: t.id,
-      symbol: t.symbol,
-      name: t.name,
-      issuer: "xStocks (Backed)",
-      decimals: p?.decimals ?? t.decimals,
+      mint,
+      symbol: r.symbol,
+      name: r.name,
+      issuer: issuerName(r.issuerKey),
+      decimals: p?.decimals ?? r.decimals ?? 8,
       /* Dust pools (a few dollars) route nowhere — only real liquidity counts. */
       tradable: price > 0 && liquidity >= MIN_TRADABLE_LIQUIDITY_USD,
-      icon: t.icon || company.icon,
-      tokenProgram: t.tokenProgram,
+      icon: r.icon || r.company.icon,
+      tokenProgram: r.tokenProgram,
       liquidityUsd: liquidity || undefined,
-      holderCount: t.holderCount,
+      holderCount: r.holderCount,
       /* Clients need this to turn a UI amount (what the wallet shows) into raw units for Jupiter. */
       scaledUi: p?.scaledUiConfig
         ? { multiplier: p.scaledUiConfig.multiplier, newMultiplier: p.scaledUiConfig.newMultiplier, newMultiplierEffectiveAt: p.scaledUiConfig.newMultiplierEffectiveAt }

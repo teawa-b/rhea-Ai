@@ -11,6 +11,12 @@ import { REGION_BY_ID, resolveRegion } from "./regions";
 
 export type ViewMode = "world" | "region" | "country" | "company";
 
+/* Who asked for the focus. On phones the side panel is a bottom sheet: a user
+ * tap (a globe marker, a list row, the holdings chip) opens it outright, while
+ * Rhea narrating her way around the world leaves it collapsed to a peek bar so
+ * the globe keeps the screen. Desktop shows the panel either way. */
+export type FocusSource = "user" | "ai";
+
 export type Connection = {
   id: string;
   from: { lat: number; lng: number; label: string };
@@ -53,17 +59,30 @@ type WorldState = {
   /** False while the camera is still flying to a newly focused place; the side
    * panel waits for arrival so the globe moves first and the panel follows. */
   panelReady: boolean;
+  /** Phones only: whether the bottom sheet is expanded (see FocusSource). */
+  panelOpen: boolean;
   /** True while the camera is away at the holdings planet (stock buildings, USDC and SOL in orbit). */
   vault: boolean;
+  /** The pre-IPO panel: private companies, their issuer marks and the premium
+   *  the onchain market is paying over them. */
+  privateMarkets: boolean;
+  /** The Meteora DBC studio. Holds the company its curve is anchored on, or ""
+   *  for an unanchored curve; null when closed. */
+  dbcStudio: string | null;
   /** Bumps whenever something the AI should know about changes (for UI context). */
   contextVersion: number;
 
   revealPanel: () => void;
+  setPanelOpen: (open: boolean) => void;
   /** Fly to the holdings planet; any focus / reset brings the camera back to Earth. */
-  showHoldings: () => void;
-  focusRegion: (q: string) => string | null;
-  focusCountry: (q: string) => CountryCode | null;
-  focusCompany: (q: string) => string | null;
+  showHoldings: (src?: FocusSource) => void;
+  /** Open (or close) the pre-IPO panel. */
+  showPrivateMarkets: (on?: boolean, src?: FocusSource) => void;
+  /** Open the DBC studio, optionally anchored on a company; null closes it. */
+  showDbcStudio: (companyId?: string | null, src?: FocusSource) => void;
+  focusRegion: (q: string, src?: FocusSource) => string | null;
+  focusCountry: (q: string, src?: FocusSource) => CountryCode | null;
+  focusCompany: (q: string, src?: FocusSource) => string | null;
   resetGlobe: (clear?: boolean) => void;
   highlightCountries: (qs: string[]) => CountryCode[];
   highlightCompanies: (qs: string[]) => string[];
@@ -128,17 +147,39 @@ export const useWorld = create<WorldState>((set, get) => ({
   comparison: null,
   streetViewCompany: null,
   panelReady: true,
+  panelOpen: true,
   vault: false,
+  privateMarkets: false,
+  dbcStudio: null,
   contextVersion: 0,
 
   revealPanel: () => { clearTimeout(revealTimer); set({ panelReady: true }); },
-  showHoldings: () => {
+  setPanelOpen: (open) => set({ panelOpen: open }),
+  showHoldings: (src = "ai") => {
     clearTimeout(revealTimer);
     /* Leave any focused place so Earth is back at the world view on return. */
-    set((s) => ({ vault: true, view: "world", focusedRegion: null, focusedCountry: null, focusedCompany: null, comparison: null, streetViewCompany: null, panelReady: true, contextVersion: s.contextVersion + 1 }));
+    set((s) => ({ vault: true, view: "world", focusedRegion: null, focusedCountry: null, focusedCompany: null, comparison: null, streetViewCompany: null, privateMarkets: false, dbcStudio: null, panelReady: true, panelOpen: src === "user", contextVersion: s.contextVersion + 1 }));
   },
 
-  focusRegion: (q) => {
+  showPrivateMarkets: (on = true, src = "ai") => {
+    clearTimeout(revealTimer);
+    set((s) => ({
+      privateMarkets: on,
+      ...(on ? { vault: false, comparison: null, dbcStudio: null, panelReady: true, panelOpen: src === "user" } : {}),
+      contextVersion: s.contextVersion + 1,
+    }));
+  },
+
+  showDbcStudio: (companyId = "", src = "ai") => {
+    clearTimeout(revealTimer);
+    set((s) => ({
+      dbcStudio: companyId,
+      ...(companyId != null ? { vault: false, comparison: null, privateMarkets: false, panelReady: true, panelOpen: src === "user" } : {}),
+      contextVersion: s.contextVersion + 1,
+    }));
+  },
+
+  focusRegion: (q, src = "ai") => {
     const region = resolveRegion(q);
     if (!region) return null;
     set((s) => ({
@@ -148,6 +189,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       focusedCountry: null,
       focusedCompany: null,
       panelReady: s.view === "region" && s.focusedRegion === region.id ? s.panelReady : holdPanelUntilArrival(),
+      panelOpen: src === "user",
       highlightedCountries: [...new Set([...s.highlightedCountries, ...region.countries])],
       comparison: null,
       streetViewCompany: null,
@@ -156,7 +198,7 @@ export const useWorld = create<WorldState>((set, get) => ({
     return region.id;
   },
 
-  focusCountry: (q) => {
+  focusCountry: (q, src = "ai") => {
     const cd = resolveCountry(q);
     if (!cd) return null;
     set((s) => ({
@@ -166,6 +208,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       focusedCountry: cd.code,
       focusedCompany: null,
       panelReady: s.view === "country" && s.focusedCountry === cd.code ? s.panelReady : holdPanelUntilArrival(),
+      panelOpen: src === "user",
       highlightedCountries: s.highlightedCountries.includes(cd.code) ? s.highlightedCountries : [...s.highlightedCountries, cd.code],
       comparison: null,
       streetViewCompany: null,
@@ -174,7 +217,7 @@ export const useWorld = create<WorldState>((set, get) => ({
     return cd.code;
   },
 
-  focusCompany: (q) => {
+  focusCompany: (q, src = "ai") => {
     const co = resolveCompany(q);
     if (!co) return null;
     set((s) => ({
@@ -184,6 +227,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       focusedCompany: co.id,
       focusedCountry: co.countryCode,
       panelReady: s.view === "company" && s.focusedCompany === co.id ? s.panelReady : holdPanelUntilArrival(),
+      panelOpen: src === "user",
       highlightedCompanies: s.highlightedCompanies.includes(co.id) ? s.highlightedCompanies : [...s.highlightedCompanies, co.id],
       chartFocusTs: null,
       comparison: null,
@@ -203,7 +247,10 @@ export const useWorld = create<WorldState>((set, get) => ({
       focusedCompany: null,
       comparison: null,
       streetViewCompany: null,
+      privateMarkets: false,
+      dbcStudio: null,
       panelReady: true,
+      panelOpen: false,
       ...(clear ? { highlightedCountries: [], highlightedCompanies: [], connections: [], countryHeat: {}, news: null, impact: null, chartEvents: [] } : {}),
       contextVersion: s.contextVersion + 1,
     }));
@@ -275,6 +322,7 @@ export const useWorld = create<WorldState>((set, get) => ({
       focusedCompany: null,
       focusedCountry: null,
       panelReady: true,
+      panelOpen: false,
       contextVersion: s.contextVersion + 1,
     }));
     return ids;
@@ -297,6 +345,9 @@ export function describeWorld(): string {
   if (s.comparison) parts.push(`Comparing: ${s.comparison.companyIds.map((id) => COMPANY_BY_ID[id]?.name).join(", ")}.`);
   if (s.highlightedCountries.length) parts.push(`Highlighted countries: ${s.highlightedCountries.map((c) => COUNTRIES[c].name).join(", ")}.`);
   if (s.connections.length) parts.push(`Arcs drawn: ${s.connections.slice(-4).map((c) => `${c.from.label}→${c.to.label}${c.label ? ` (${c.label})` : ""}`).join("; ")}.`);
+  if (!s.panelOpen && typeof window !== "undefined" && window.matchMedia("(max-width: 600px)").matches) {
+    parts.push("On this phone the detail panel is collapsed to a peek bar at the bottom so the globe stays visible; the user can tap it to open the panel.");
+  }
   if (s.news) parts.push(`News cards shown for ${s.news.target}: ${s.news.items.slice(0, 3).map((n) => n.title).join(" | ")}.`);
   return parts.join(" ");
 }

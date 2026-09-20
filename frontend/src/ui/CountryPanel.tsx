@@ -51,7 +51,7 @@ export function CountryPanel({ code }: { code: CountryCode }) {
             const live = (p?.tokenPriceUsd ?? 0) > 0;
             const ch = p?.change24hPct ?? null;
             return (
-              <div key={id} className="item" onClick={() => focusCompany(id)}>
+              <div key={id} className="item" onClick={() => focusCompany(id, "user")}>
                 <CoLogo id={id} />
                 <div className="grow">
                   <div className="name">{co.name} <span className="muted">{co.ticker}</span></div>

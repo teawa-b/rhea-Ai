@@ -3,15 +3,19 @@ import type { Request, Response, Router } from "express";
 import express from "express";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  COMPANIES, COMPANY_BY_ID, COMPANY_BY_TOKEN, COUNTRIES, MIN_TRADE_LIQUIDITY_USD, TRIGGER_MIN_ORDER_USD, USDC_MINT,
+  COMPANIES, COMPANY_BY_ID, COMPANY_BY_TOKEN, COUNTRIES, MIN_TRADE_LIQUIDITY_USD,
+  PRESTOCKS_DISCLOSURE_URL, PRESTOCKS_ISSUER, PRESTOCKS_MIN_TRADE_USD, PRESTOCKS_RESTRICTED_JURISDICTIONS, PRESTOCKS_TERMS_URL,
+  TRIGGER_MIN_ORDER_USD, USDC_MINT,
   XSTOCKS_DISCLOSURE_URL, XSTOCKS_MIN_TRADE_USD, XSTOCKS_RESTRICTED_JURISDICTIONS, resolveCompany,
 } from "../shared/registry";
 import type {
   AssetCapability, Briefing, BriefingDistribution, BriefingHolding, ChartRange, Company, CorporateAction, CountrySummary, EligibilityResult,
-  MarketOverview, Portfolio, Position, TokenizedAsset,
+  DbcPlanInput, MarketOverview, Portfolio, Position, PrivateMarketSnapshot, PrivateMarketsOverview, TokenizedAsset,
 } from "../shared/types";
 import { hasPythKey, history, lastCloseFor, priceSnapshot, sessionInfo } from "./feeds";
 import { JupiterError, executeSwap, getPrices, getSwapQuote, hasJupiterKey, listTokenizedAssets, triggerProxy, type JupPrice } from "./jupiter";
+import { PRESTOCKS_DISCLOSURE, impliedValuation, preStocksCatalog, premiumToMark } from "./prestocks";
+import { DBC_PRESETS, DEFAULT_PRESET, dbcPoolStatus, planEquityCurve } from "./meteora";
 import { corporateActions, proofOfReserves, type XCorporateAction } from "./xstocks";
 
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
@@ -38,9 +42,24 @@ function fail(res: Response, e: unknown, fallback = "Couldn't reach Jupiter righ
   res.status(502).json({ error: fallback, ...(IS_PROD ? {} : { debug: raw }) });
 }
 
+/** The company's primary wrapper — what a bare "buy SpaceX" resolves to. */
 async function assetFor(companyId: string): Promise<TokenizedAsset | undefined> {
   const assets = await listTokenizedAssets();
-  return assets.find((a) => a.companyId === companyId);
+  const mine = assets.filter((a) => a.companyId === companyId);
+  return mine.find((a) => a.primary) ?? mine[0];
+}
+
+/** Every tokenized wrapper of a company, primary first, then by liquidity. */
+async function assetsFor(companyId: string): Promise<TokenizedAsset[]> {
+  const assets = await listTokenizedAssets();
+  return assets
+    .filter((a) => a.companyId === companyId)
+    .sort((a, b) => Number(b.primary) - Number(a.primary) || (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0));
+}
+
+/** One wrapper by asset id, so the client can price a specific issuer's token. */
+async function assetById(assetId: string): Promise<TokenizedAsset | undefined> {
+  return (await listTokenizedAssets()).find((a) => a.id === assetId);
 }
 
 /* ---------------- Overview ---------------- */
@@ -70,19 +89,77 @@ export async function buildOverview(): Promise<MarketOverview> {
   };
 }
 
+/* ---------------- Private (pre-IPO) markets ----------------
+ *
+ * The companies here are not listed anywhere, so none of the equity machinery
+ * applies: no session, no close, no Pyth feed. What a viewer needs instead is
+ * the issuer's mark, the price the onchain market is actually paying, and the
+ * gap between the two — plus where the backing is attested.
+ */
+
+export async function buildPrivateMarkets(): Promise<PrivateMarketsOverview> {
+  const [assets, marks] = await Promise.all([listTokenizedAssets(), preStocksCatalog()]);
+  const preStockAssets = assets.filter((a) => a.issuerKey === "prestocks");
+
+  const out: PrivateMarketSnapshot[] = [];
+  for (const a of preStockAssets) {
+    const co = COMPANY_BY_ID[a.companyId];
+    if (!co) continue;
+    const mark = marks?.find((m) => m.mint === a.mint) ?? null;
+    const prices = await getPrices([a.mint]).catch(() => ({} as Record<string, JupPrice>));
+    const p = prices[a.mint];
+    const tokenPrice = p?.usdPrice ?? null;
+    const premium = premiumToMark(tokenPrice, mark?.markPriceUsd);
+    const display = mark?.symbol ?? a.symbol;
+    out.push({
+      companyId: co.id,
+      companyName: co.name,
+      mint: a.mint,
+      symbol: display,
+      issuer: PRESTOCKS_ISSUER,
+      sector: co.sector,
+      tokenPriceUsd: tokenPrice,
+      markPriceUsd: mark?.markPriceUsd ?? null,
+      markValuationUsd: mark?.markValuationUsd ?? null,
+      impliedValuationUsd: impliedValuation(tokenPrice, mark),
+      premiumToMarkPct: premium == null ? null : Math.round(premium * 100) / 100,
+      /* PreStocks publishes no holder count; Jupiter's is the only source. */
+      holders: a.holderCount ?? null,
+      liquidityUsd: a.liquidityUsd ?? null,
+      change24hPct: p?.priceChange24h ?? null,
+      tradable: a.tradable,
+      markFetchedAt: mark?.fetchedAt ?? null,
+      markUnavailable: mark == null,
+    });
+  }
+  /* Biggest implied valuation first — that is the order people scan them in. */
+  out.sort((x, y) => (y.impliedValuationUsd ?? 0) - (x.impliedValuationUsd ?? 0));
+
+  return {
+    assets: out,
+    issuer: PRESTOCKS_ISSUER,
+    disclosure: PRESTOCKS_DISCLOSURE,
+    disclosureUrl: PRESTOCKS_DISCLOSURE_URL,
+    termsUrl: PRESTOCKS_TERMS_URL,
+    restrictedJurisdictions: PRESTOCKS_RESTRICTED_JURISDICTIONS,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 /* ---------------- Trade checks: liquidity floor + minimums ---------------- */
 
 export function capabilityFor(asset: TokenizedAsset): AssetCapability {
+  const isPreStock = asset.issuerKey === "prestocks";
   return {
     assetId: asset.id,
     issuer: asset.issuer,
     supportedJurisdictions: "all",
-    restrictedJurisdictions: XSTOCKS_RESTRICTED_JURISDICTIONS,
+    restrictedJurisdictions: isPreStock ? PRESTOCKS_RESTRICTED_JURISDICTIONS : XSTOCKS_RESTRICTED_JURISDICTIONS,
     requiresKyc: false,
     tradable: asset.tradable,
     transferable: true,
-    minimumTradeUsd: XSTOCKS_MIN_TRADE_USD,
-    disclosureUrl: XSTOCKS_DISCLOSURE_URL,
+    minimumTradeUsd: isPreStock ? PRESTOCKS_MIN_TRADE_USD : XSTOCKS_MIN_TRADE_USD,
+    disclosureUrl: isPreStock ? PRESTOCKS_DISCLOSURE_URL : XSTOCKS_DISCLOSURE_URL,
   };
 }
 
@@ -91,10 +168,17 @@ export const XSTOCKS_DISCLOSURE =
   `They carry issuer, market, liquidity and smart-contract risk, and their price can move outside regular US trading hours. ` +
   `This is not investment advice.`;
 
+/** The disclosure that belongs to whoever issued this token. */
+export function disclosureFor(asset: TokenizedAsset | undefined): { disclosure: string; disclosureUrl: string } {
+  return asset?.issuerKey === "prestocks"
+    ? { disclosure: PRESTOCKS_DISCLOSURE, disclosureUrl: PRESTOCKS_DISCLOSURE_URL }
+    : { disclosure: XSTOCKS_DISCLOSURE, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
+}
+
 export function checkEligibility(asset: TokenizedAsset | undefined, action: "buy" | "sell" | "trigger", amountUsd?: number): EligibilityResult {
   const reasons: string[] = [];
-  const disclosure = XSTOCKS_DISCLOSURE;
-  if (!asset) return { allowed: false, reasons: ["This company has no tokenized asset on Solana yet."], disclosure, disclosureUrl: XSTOCKS_DISCLOSURE_URL };
+  const { disclosure, disclosureUrl } = disclosureFor(asset);
+  if (!asset) return { allowed: false, reasons: ["This company has no tokenized asset on Solana yet."], disclosure, disclosureUrl };
   const cap = capabilityFor(asset);
   const liquidity = asset.liquidityUsd ?? 0;
   /* Sells stay open at any liquidity so a holder is never locked in. */
@@ -395,18 +479,81 @@ export function marketRouter(): Router {
     catch (e) { bad(res, 502, (e as Error).message); }
   });
 
+  /* ---- Meteora DBC studio (read-only) ---- *
+   * Plans and inspects bonding curves for tokenized equities. Nothing here
+   * signs or sends: launching is a human action with real money. */
+  r.post("/dbc/plan", async (req: Request, res: Response) => {
+    const b = (req.body ?? {}) as Partial<DbcPlanInput> & { companyId?: string };
+    try {
+      let referencePriceUsd = Number(b.referencePriceUsd);
+      let referenceSource = String(b.referenceSource ?? "");
+      let referenceAt: string | null = b.referenceAt ?? null;
+      let baseSymbol = String(b.baseSymbol ?? "");
+
+      /* Anchoring on a company resolves the reference price from whatever feed
+       * is right for it: an equity price for a listed one, the issuer's mark
+       * for a private one. That is the whole point of the tool. */
+      if (b.companyId) {
+        const co = COMPANY_BY_ID[b.companyId] ?? resolveCompany(b.companyId);
+        if (!co) return bad(res, 404, "Unknown company");
+        const asset = await assetFor(co.id);
+        const price = await priceSnapshot(co, asset);
+        const ref = price.underlyingPriceUsd ?? price.tokenPriceUsd;
+        if (!ref) return bad(res, 502, `No reference price is available for ${co.name} right now.`);
+        referencePriceUsd = ref;
+        referenceSource = price.underlyingSource === "issuer-mark" ? "PreStocks issuer mark"
+          : price.underlyingSource === "pyth" ? `Pyth ${co.pythSymbol ?? co.ticker}`
+          : price.underlyingSource === "none" ? "Jupiter onchain price"
+          : price.underlyingSource;
+        referenceAt = price.underlyingUpdatedAt ?? price.tokenUpdatedAt;
+        baseSymbol = baseSymbol || asset?.symbol || co.tokenSymbol;
+        if (!b.presetId && co.private) b.presetId = "pre-ipo";
+      }
+
+      if (!baseSymbol) return bad(res, 400, "A base token symbol is required.");
+      if (!Number.isFinite(referencePriceUsd) || referencePriceUsd <= 0) {
+        return bad(res, 400, "A positive reference price is required to anchor the curve.");
+      }
+      res.json(planEquityCurve({ ...b, baseSymbol, referencePriceUsd, referenceSource: referenceSource || "caller-supplied", referenceAt }));
+    } catch (e) { bad(res, 400, (e as Error).message); }
+  });
+
+  r.get("/dbc/presets", (_req, res) => res.json({ presets: Object.values(DBC_PRESETS), default: DEFAULT_PRESET }));
+
+  r.get("/dbc/pool/:address", async (req: Request, res: Response) => {
+    try { res.json(await dbcPoolStatus(String(req.params.address))); }
+    catch (e) { bad(res, 404, (e as Error).message); }
+  });
+
+  r.get("/private", async (_req, res) => {
+    try { res.json(await buildPrivateMarkets()); }
+    catch (e) { bad(res, 502, (e as Error).message); }
+  });
+
   r.get("/company/:id", async (req: Request, res: Response) => {
     const co = COMPANY_BY_ID[String(req.params.id)] ?? resolveCompany(String(req.params.id));
     if (!co) return bad(res, 404, "Unknown company");
     try {
-      const asset = await assetFor(co.id);
-      /* xStocks calls resolve to null on failure, so they never fail the panel. */
+      const all = await assetsFor(co.id);
+      const asset = all.find((a) => a.primary) ?? all[0];
+      /* Issuer calls resolve to null on failure, so they never fail the panel. */
       const [price, xca, reserves] = await Promise.all([priceSnapshot(co, asset), corporateActions(co.tokenSymbol), proofOfReserves(co.tokenSymbol)]);
+      /* A company can be wrapped by more than one issuer (SpaceX: Backed and
+       * issuer). Price each separately — they are different instruments with
+       * different backing, and their prices routinely diverge. */
+      const wrappers = await Promise.all(all.map(async (a) => ({
+        asset: a,
+        price: a.id === asset?.id ? price : await priceSnapshot(co, a),
+        capability: capabilityFor(a),
+        ...disclosureFor(a),
+        })));
       res.json({
         company: co, asset: asset ?? null, price,
         corporateActions: classifyCorporateActions(co.id, xca, price.rebase),
         reserves,
         capability: asset ? capabilityFor(asset) : null,
+        ...disclosureFor(asset),
+        wrappers,
       });
     } catch (e) { bad(res, 502, (e as Error).message); }
   });

@@ -13,6 +13,7 @@
 import { COMPANY_BY_ID } from "../shared/registry";
 import type { Candle, ChartHistory, ChartRange, Company, MarketSessionInfo, PriceSnapshot, SessionLabel, TokenizedAsset } from "../shared/types";
 import { getPrices } from "./jupiter";
+import { impliedValuation, preStockByMint, premiumToMark } from "./prestocks";
 import { xstocksAsset } from "./xstocks";
 
 const PYTH_KEY = process.env.PYTH_PRO_API_KEY || "";
@@ -225,11 +226,63 @@ export async function lastCloseFor(company: Company): Promise<{ lastCloseUsd: nu
 
 /* ---------------- Snapshot ---------------- */
 
+/* ---------------- Private markets: PreStock snapshot ----------------
+ *
+ * A private company has no exchange, so there is no last trade, no session and
+ * no close to gap against. The reference is the issuer's mark on the segregated
+ * portfolio, and the number that matters is what the onchain market is paying
+ * over (or under) it. Jupiter's `stockData` is deliberately ignored here: for
+ * these mints it reports the company on its own basis rather than the token's.
+ */
+async function preStockSnapshot(company: Company, asset: TokenizedAsset): Promise<PriceSnapshot> {
+  const mint = asset.mint;
+  const [jup, mark] = await Promise.all([
+    getPrices([mint]).then((m) => m[mint]).catch(() => undefined),
+    preStockByMint(mint),
+  ]);
+
+  const tokenPrice = jup?.usdPrice ?? null;
+  const tokenAt = jup ? new Date().toISOString() : null;
+  const premium = premiumToMark(tokenPrice, mark?.markPriceUsd);
+  const newest = [mark?.fetchedAt ?? null, tokenAt].filter(Boolean).map((v) => Date.parse(v as string));
+  /* Nothing to compare against, or the onchain price never arrived. */
+  const stale = tokenPrice == null || newest.length === 0;
+
+  return {
+    companyId: company.id,
+    mint,
+    tokenPriceUsd: tokenPrice,
+    underlyingPriceUsd: mark?.markPriceUsd ?? null,
+    underlyingSource: mark?.markPriceUsd != null ? "issuer-mark" : "none",
+    markPriceUsd: mark?.markPriceUsd ?? null,
+    premiumToMarkPct: premium == null ? null : Math.round(premium * 100) / 100,
+    impliedValuationUsd: impliedValuation(tokenPrice, mark),
+    change24hPct: jup?.priceChange24h ?? null,
+    /* No exchange behind a private company: there is no session to report. */
+    marketSession: "unknown",
+    tokenUpdatedAt: tokenAt,
+    underlyingUpdatedAt: mark?.fetchedAt ?? null,
+    stale,
+    /* No equity close exists, so these stay unset rather than borrowing a
+     * number from a listed company that happens to share a ticker. */
+    lastCloseUsd: null,
+    lastCloseAt: null,
+    gapVsClosePct: null,
+    xstocksPeriod: null,
+    xstocksOpenNow: null,
+    halted: null,
+    nextRegularOpenAt: null,
+  };
+}
+
 export async function priceSnapshot(company: Company, asset: TokenizedAsset | undefined): Promise<PriceSnapshot> {
+  /* Branch on the asset's issuer, not the company's: only a PreStock is priced
+   * against an issuer mark, and a company could be wrapped by more than one. */
+  if (asset?.issuerKey === "prestocks") return preStockSnapshot(company, asset);
   const mint = asset?.mint ?? "";
   const [jup, pyth, session, info, close, xs] = await Promise.all([
     mint ? getPrices([mint]).then((m) => m[mint]).catch(() => undefined) : Promise.resolve(undefined),
-    pythLatest(company),
+    company.private ? Promise.resolve(null) : pythLatest(company),
     marketSession(company),
     sessionInfo(company),
     lastCloseFor(company),
@@ -241,7 +294,7 @@ export async function priceSnapshot(company: Company, asset: TokenizedAsset | un
   let underlyingAt: string | null = null;
   if (pyth) { underlying = pyth.price; underlyingSource = "pyth"; underlyingAt = pyth.at; }
   else if (jup?.stockData?.price) { underlying = jup.stockData.price; underlyingSource = "jupiter-stockdata"; underlyingAt = jup.stockData.updatedAt; }
-  else {
+  else if (!company.private) {
     const m = await yahooMeta(company.yahooSymbol ?? company.ticker);
     if (m?.regularMarketPrice) {
       underlying = m.regularMarketPrice; underlyingSource = "yahoo";
@@ -306,6 +359,18 @@ export async function history(companyId: string, range: ChartRange): Promise<Cha
   const cached = histCache.get(key);
   const ttl = range === "1D" ? 60_000 : 10 * 60_000;
   if (cached && Date.now() - cached.at < ttl) return cached.data;
+
+  /* No exchange lists a private company, so there is no OHLC series anywhere.
+   * Asking Yahoo for its ticker 404s, which used to surface as a 502 and left
+   * the chart spinning forever. An empty series with a reason is the honest
+   * answer, and the panel renders it as a sentence instead of a spinner. */
+  if (company.private) {
+    return {
+      companyId, range, resolution: "none", source: "none", candles: [],
+      fetchedAt: new Date().toISOString(),
+      unavailableReason: `${company.name} is private, so there is no exchange price history to chart. The issuer's mark and the onchain price are the only two prices that exist.`,
+    };
+  }
 
   const cfg = RANGE_CFG[range];
   let candles: Candle[] = [];

@@ -11,6 +11,7 @@ import { useWorld } from "@/state/world";
 import { useMarket } from "@/state/market";
 import { buildBaseMap, buildHighlightMap } from "./globeTexture";
 import { R, latLngToVec3 } from "./geo";
+import { consumeTap } from "./arPlace";
 import { DIST, rig, userNudge, userZoom } from "./rig";
 
 /* ---------------- Fresnel shaders ---------------- */
@@ -84,6 +85,8 @@ export function Globe() {
   /* Pointer drag → rotate. Works with mouse, touch and XR controller rays. */
   const drag = useRef({ on: false, id: -1, x: 0, y: 0, moved: 0, t: 0 });
   const onDown = (e: ThreeEvent<PointerEvent>) => {
+    /* The planet itself was grabbed, so AR placement must not also move it. */
+    consumeTap();
     drag.current = { on: true, id: e.pointerId, x: e.nativeEvent.clientX ?? 0, y: e.nativeEvent.clientY ?? 0, moved: 0, t: performance.now() };
     rig.dragging = true; rig.vy = 0; rig.vp = 0; rig.tweening = false;
     (e.target as Element | undefined)?.setPointerCapture?.(e.pointerId);
@@ -92,6 +95,8 @@ export function Globe() {
     const d = drag.current;
     if (!d.on || e.pointerId !== d.id) return;
     const x = e.nativeEvent.clientX ?? 0, y = e.nativeEvent.clientY ?? 0;
+    /* A pinch (gestures.ts) owns the touch: keep tracking the finger, but don't spin. */
+    if (rig.pinching) { d.x = x; d.y = y; return; }
     const dx = x - d.x, dy = y - d.y;
     d.x = x; d.y = y; d.moved += Math.abs(dx) + Math.abs(dy);
     const k = 0.0062 * (rig.dist / DIST.world);

@@ -35,7 +35,7 @@ export function RegionPanel({ id }: { id: string }) {
       <div className="panel-body scroll">
         {markets.length ? markets.map((cs) => (
           <div key={cs.code} className="region-market">
-            <button className="region-country" onClick={() => focusCountry(cs.code)}>
+            <button className="region-country" onClick={() => focusCountry(cs.code, "user")}>
               <span className="name">{cs.name}</span>
               <span className="meta">{cs.tradableCount} stock{cs.tradableCount === 1 ? "" : "s"} ›</span>
             </button>
@@ -43,7 +43,7 @@ export function RegionPanel({ id }: { id: string }) {
               {cs.companies.slice(0, 4).map((cid) => {
                 const co = COMPANY_BY_ID[cid]; const p = prices[cid]; const ch = p?.change24hPct ?? null;
                 return (
-                  <div key={cid} className="item" onClick={() => focusCompany(cid)}>
+                  <div key={cid} className="item" onClick={() => focusCompany(cid, "user")}>
                     <CoLogo id={cid} />
                     <div className="grow"><div className="name">{co.name} <span className="muted">{co.ticker}</span></div><div className="meta">{co.sector}</div></div>
                     <div style={{ textAlign: "right" }}>

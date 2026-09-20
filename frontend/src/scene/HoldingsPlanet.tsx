@@ -241,7 +241,7 @@ function Storefront({ b, rise, inXR, onBuilt }: { b: Shop; rise: number | null; 
   const facing = useRef(0);
   const yaw = useRef(0);
 
-  const open = useCallback(() => focusCompany(b.companyId), [focusCompany, b.companyId]);
+  const open = useCallback(() => focusCompany(b.companyId, "user"), [focusCompany, b.companyId]);
 
   const w = b.width;
   const d = b.depth;

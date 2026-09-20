@@ -7,7 +7,7 @@ import { api } from "@/market/api";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { isGated, prepareTrade, prepareTrigger, describeRule } from "@/solana/trade";
-import { fmtAge, fmtPct, fmtUsd, sessionLabel } from "@/theme";
+import { fmtAge, fmtPct, fmtUsd, fmtValuation, sessionLabel } from "@/theme";
 import type { CorporateAction } from "@shared/types";
 import { Chart } from "./Chart";
 import { CloseIcon } from "./icons";
@@ -25,6 +25,25 @@ function caAmounts(ca: CorporateAction) {
   if (ca.netAmount == null && ca.grossAmount == null) return null;
   const parts = [ca.netAmount != null ? `Net ${caMoney(ca.netAmount, ca.currency)}` : null, ca.grossAmount != null ? `gross ${caMoney(ca.grossAmount, ca.currency)}` : null].filter(Boolean);
   return `${parts.join(" · ")} per share-equivalent${ca.withholdingPct ? ` · ${ca.withholdingPct}% withholding` : ""}`;
+}
+
+/** A collapsed section of the company panel. Everything that is reference
+ *  rather than the reason you opened the panel lives behind one of these. */
+function Section({ title, count, defaultOpen = false, children }: {
+  title: string; count?: number; defaultOpen?: boolean; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <>
+      <div className="divider" />
+      <button type="button" className="sect" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {title}
+        {count != null ? <span className="count">{count}</span> : null}
+        <span className="caret" aria-hidden>›</span>
+      </button>
+      {open ? <div className="sect-body">{children}</div> : null}
+    </>
+  );
 }
 
 export function CompanyPanel({ companyId }: { companyId: string }) {
@@ -78,6 +97,37 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const inSession = p?.sessionLabel ? p.sessionLabel === "US regular session" : p?.marketSession === "regular";
   const gap = !inSession && p?.gapVsClosePct != null && Number.isFinite(p.gapVsClosePct) ? p.gapVsClosePct : null;
   const reserves = detail?.reserves ?? null;
+  /* A private company has no exchange behind it: the reference is the issuer's
+   * mark, there is no session and no 4pm close to gap against. */
+  const isPrivate = Boolean(co?.private) || p?.underlyingSource === "issuer-mark";
+  const premium = p?.premiumToMarkPct ?? null;
+  /* What the reference price is called, and where it came from. */
+  const refLabel = isPrivate ? "Issuer mark" : "Underlying";
+  const refSource = p?.underlyingSource === "issuer-mark" ? "PreStocks"
+    : p?.underlyingSource === "pyth" ? "Pyth Pro"
+    : p?.underlyingSource === "jupiter-stockdata" ? "xStocks ref"
+    : p?.underlyingSource === "yahoo" ? "Yahoo" : "";
+  /* The session is steady state, so it reads as text rather than a chip. */
+  const sessionText = isPrivate
+    ? "Private company · trades 24/7"
+    : p ? session ?? p.marketSession.replace("_", " ") : "…";
+  /* At most one chip: the single number worth flagging about this price. */
+  const notable: { label: string; tone: string; title?: string } | null =
+    isPrivate && premium != null
+      ? { label: `${premium >= 0 ? "+" : ""}${premium.toFixed(2)}% vs mark`, tone: premium >= 0 ? "green" : "magenta",
+          title: `Onchain ${fmtUsd(p?.tokenPriceUsd)} against the issuer's mark of ${fmtUsd(p?.markPriceUsd)} per token` }
+      : gap != null
+        ? { label: `${gap >= 0 ? "+" : ""}${gap.toFixed(2)}% vs 4pm close`, tone: gap >= 0 ? "green" : "magenta",
+            title: p?.lastCloseUsd != null ? `Solana token ${fmtUsd(p.tokenPriceUsd)} vs ${fmtUsd(p.lastCloseUsd)} at the US 4pm ET close` : undefined }
+        : divergence != null && Math.abs(divergence) > 0.5
+          ? { label: `${divergence > 0 ? "+" : ""}${divergence.toFixed(2)}% vs stock`, tone: "amber" }
+          : null;
+
+  /* Every tokenized wrapper of this company. More than one means two issuers
+   * wrap the same exposure and their prices are worth comparing directly. */
+  const wrappers = detail?.wrappers ?? [];
+  const multiWrapped = wrappers.length > 1;
+  const showDbcStudio = useWorld((s) => s.showDbcStudio);
   /* Upcoming first, then newest. */
   const actions = [...(detail?.corporateActions ?? [])].sort((a, b) => Number(!!b.upcoming) - Number(!!a.upcoming) || Date.parse(b.effectiveAt) - Date.parse(a.effectiveAt));
   /* Signed-out users may still press Buy: prepareTrade opens the sign-in panel. */
@@ -114,56 +164,99 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           <CoLogo id={co.id} size={34} />
           <div style={{ minWidth: 0 }}>
           <h2>{co.name}</h2>
-          <div className="sub">{co.ticker} · {co.tokenSymbol} · {co.sector} · {COUNTRIES[co.countryCode].name}</div>
+          <div className="sub">{co.ticker} · {co.sector}</div>
           </div>
         </div>
-        <button className="icon-btn" onClick={() => focusCountry(co.countryCode)} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
+        <button className="icon-btn" onClick={() => focusCountry(co.countryCode, "user")} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
       </div>
       <div className="panel-body scroll">
-        {/* Prices */}
-        <div className="row" style={{ alignItems: "baseline", gap: 14 }}>
-          <div>
-            <div className="hint">UNDERLYING · {p?.underlyingSource === "pyth" ? "Pyth Pro" : p?.underlyingSource === "jupiter-stockdata" ? "Jupiter · xStocks ref" : p?.underlyingSource === "yahoo" ? "Yahoo (fallback)" : "—"}</div>
-            <div className="big">{fmtUsd(p?.underlyingPriceUsd)}</div>
-          </div>
-          <div>
-            <div className="hint">ONCHAIN TOKEN · Jupiter</div>
-            <div className="big" style={{ fontSize: 20 }}>{fmtUsd(p?.tokenPriceUsd)} <span className={cls} style={{ fontSize: 13 }}>{fmtPct(change)}</span></div>
-          </div>
+        {/* Prices.
+         *
+         * One hero number. The onchain price is what a buy actually costs, so
+         * it gets the size; the reference — an equity quote for a listed
+         * company, the issuer's mark for a private one — sits under it as a
+         * quiet line with its own age, because they are different data with
+         * different timestamps and that has to stay visible.
+         *
+         * Steady-state facts (the session) are plain text. A bordered chip is
+         * reserved for something notable: a premium to mark, a gap to the 4pm
+         * close, a halt, stale data. */}
+        <div className="price">
+          <span className="price-now">{fmtUsd(p?.tokenPriceUsd)}</span>
+          <span className={`price-chg ${cls}`}>{fmtPct(change)}</span>
         </div>
-        <div className="row" style={{ marginTop: 6 }}>
-          <span className={`tag ${inSession ? "green" : "dim"}`}>{p ? session ?? p.marketSession.replace("_", " ") : "…"}</span>
+        <div className="hint">onchain · Jupiter · {fmtAge(p?.tokenUpdatedAt)}</div>
+
+        <div className="hint" style={{ marginTop: 6 }}>
+          {refLabel} <span className="mono" style={{ color: "#cfe3f5" }}>{fmtUsd(p?.underlyingPriceUsd)}</span>
+          {refSource ? ` · ${refSource}` : ""} · {fmtAge(p?.underlyingUpdatedAt)}
+        </div>
+
+        <div className="row" style={{ marginTop: 8 }}>
+          {notable ? (
+            <span className={`tag ${notable.tone}`} style={CASE} title={notable.title}>{notable.label}</span>
+          ) : null}
           {p?.halted ? <span className="tag magenta" title="The issuer has halted this xStock">issuer halt</span> : null}
           {p?.stale ? <span className="tag amber">stale data</span> : null}
-          {gap != null ? (
-            <span className={`tag ${gap >= 0 ? "green" : "magenta"}`} style={CASE} title={p?.lastCloseUsd != null ? `Solana token ${fmtUsd(p.tokenPriceUsd)} vs ${fmtUsd(p.lastCloseUsd)} at the US 4pm ET close` : undefined}>
-              Token {gap >= 0 ? "+" : ""}{gap.toFixed(2)}% vs 4pm close
-            </span>
-          ) : divergence != null && Math.abs(divergence) > 0.5 ? <span className="tag amber">token {divergence > 0 ? "+" : ""}{divergence.toFixed(2)}% vs stock</span> : null}
-          {reserves ? (
-            <span className={`tag ${reserves.backedPct >= 100 ? "green" : "amber"}`} style={CASE} title={`${reserves.shares.toLocaleString(undefined, { maximumFractionDigits: 0 })} shares held at ${reserves.custodian} vs ${reserves.circulating.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${reserves.symbol} circulating (all chains) · xStocks proof of reserves · ${fmtAge(reserves.asOf)}`}>
-              Backed {reserves.backedPct.toFixed(2)}% · {reserves.custodian}
-            </span>
-          ) : null}
-          <span className="hint">token {fmtAge(p?.tokenUpdatedAt)} · stock {fmtAge(p?.underlyingUpdatedAt)}</span>
+          <span className="hint">{sessionText}</span>
         </div>
 
-        <div className="divider" />
-        <Chart companyId={co.id} ticker={co.ticker} />
+        {isPrivate && p?.impliedValuationUsd ? (
+          <div className="hint" style={{ marginTop: 4 }}>
+            At this price the market values {co.name} at {fmtValuation(p.impliedValuationUsd)}.
+          </div>
+        ) : null}
 
-        {/* Position */}
-        <div className="divider" />
-        <dl className="kv">
-          <dt>Your position</dt><dd>{pos ? `${pos.amountUi.toFixed(4)} ${pos.symbol}` : auth.authenticated ? "none" : "sign in"}</dd>
-          <dt>Position value</dt><dd>{pos ? fmtUsd(pos.valueUsd) : "—"}</dd>
-          {detail?.asset ? <><dt>Liquidity</dt><dd>{fmtUsd(detail.asset.liquidityUsd, 0)}</dd></> : null}
-          {detail?.asset ? <><dt>Mint</dt><dd className="muted" title={detail.asset.mint}>{detail.asset.mint.slice(0, 6)}…{detail.asset.mint.slice(-4)}</dd></> : null}
-        </dl>
+        {multiWrapped ? (
+          <div style={{ marginTop: 12 }}>
+            <div className="hint">TOKENIZED BY {wrappers.length} ISSUERS</div>
+            {wrappers.map((w) => {
+              const prem = w.price.premiumToMarkPct;
+              return (
+                <div key={w.asset.id} className="row" style={{ gap: 8, alignItems: "baseline", padding: "4px 0", flexWrap: "nowrap" }}>
+                  <span className="mono" style={{ width: 74, flex: "0 0 auto", fontSize: 12 }}>{w.asset.symbol}</span>
+                  <span className="hint" style={{ flex: 1, minWidth: 0 }}>{w.asset.issuer}</span>
+                  <span className="mono" style={{ fontSize: 13 }}>{fmtUsd(w.price.tokenPriceUsd)}</span>
+                  {prem != null ? <span className={`tag ${prem >= 0 ? "green" : "magenta"}`} style={CASE}>{prem >= 0 ? "+" : ""}{prem.toFixed(1)}%</span> : null}
+                  {!w.asset.tradable ? <span className="tag amber">thin</span> : null}
+                </div>
+              );
+            })}
+            <div className="hint" style={{ marginTop: 4, lineHeight: 1.45 }}>
+              Different issuers, different backing and different legal claims — the prices are not
+              interchangeable quotes for the same instrument.
+            </div>
+          </div>
+        ) : null}
 
-        {/* Active orders */}
+        <div className="divider" />
+        {isPrivate ? (
+          /* No exchange lists this company, so there is no series to draw and
+           * the range buttons would be meaningless. Say why, rather than
+           * leaving a chart that can only ever show a spinner. */
+          <div className="hint" style={{ lineHeight: 1.5 }}>
+            No price history: {co.name} is private, so there is no exchange series to chart. The issuer's
+            mark and the onchain price above are the only two prices that exist.
+          </div>
+        ) : (
+          <Chart companyId={co.id} ticker={co.ticker} />
+        )}
+
+        {/* Position, liquidity and backing — reference, not the headline. */}
+        <Section title="Position & details" defaultOpen={Boolean(pos)}>
+          <dl className="kv">
+            <dt>Your position</dt><dd>{pos ? `${pos.amountUi.toFixed(4)} ${pos.symbol}` : auth.authenticated ? "none" : "sign in"}</dd>
+            <dt>Position value</dt><dd>{pos ? fmtUsd(pos.valueUsd) : "—"}</dd>
+            {detail?.asset ? <><dt>Liquidity</dt><dd>{fmtUsd(detail.asset.liquidityUsd, 0)}</dd></> : null}
+            {detail?.asset ? <><dt>Issuer</dt><dd>{detail.asset.issuer}</dd></> : null}
+            {reserves ? <><dt>Backed</dt><dd title={`${reserves.shares.toLocaleString(undefined, { maximumFractionDigits: 0 })} shares at ${reserves.custodian} vs ${reserves.circulating.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${reserves.symbol} circulating · ${fmtAge(reserves.asOf)}`}>{reserves.backedPct.toFixed(2)}% · {reserves.custodian}</dd></> : null}
+            {detail?.asset ? <><dt>Mint</dt><dd className="muted" title={detail.asset.mint}>{detail.asset.mint.slice(0, 6)}…{detail.asset.mint.slice(-4)}</dd></> : null}
+          </dl>
+        </Section>
+
+        {/* Active orders: open by default — an unfilled order is live money. */}
         {active.length ? (
-          <>
-            <div className="divider" />
+          <Section title="Open orders" count={active.length} defaultOpen>
             {active.map((o) => (
               <div key={o.id} className="impact" style={{ marginBottom: 6 }}>
                 <div className="row"><span className="tag amber">◉ limit order</span>{o.simulated ? <span className="tag dim">dev only</span> : <span className="tag green">held by Jupiter, not Rhea</span>}</div>
@@ -171,14 +264,12 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
                 <div className="hint">created {fmtAge(o.createdAt)}{o.jupiterOrderId ? ` · Jupiter ${o.jupiterOrderId.slice(0, 8)}…` : ""}</div>
               </div>
             ))}
-          </>
+          </Section>
         ) : null}
 
         {/* Corporate actions */}
         {actions.length ? (
-          <>
-            <div className="divider" />
-            <div className="hint" style={{ marginBottom: 4 }}>CORPORATE ACTIONS · xStocks</div>
+          <Section title="Corporate actions" count={actions.length} defaultOpen={actions.some((a) => a.upcoming)}>
             {actions.map((ca) => {
               const amounts = caAmounts(ca);
               return (
@@ -194,7 +285,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
                 </div>
               );
             })}
-          </>
+          </Section>
         ) : null}
 
         {/* Trade */}
@@ -208,23 +299,29 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           <button className="btn sol sm" disabled={!canTrade || busy != null} onClick={doBuy}>{busy === "buy" ? "Quoting…" : `Buy ${co.tokenSymbol}`}</button>
           <button className="btn danger sm" disabled={!canTrade || !pos || busy != null} onClick={doSell}>Sell all</button>
         </div>
-        <div className="row" style={{ marginTop: 8 }}>
-          <span className="hint">Buy</span>
-          <input className="chip mono" type="number" min={1} value={trigger.amount} onChange={(e) => setTrigger({ ...trigger, amount: e.target.value })} style={{ width: 80 }} />
-          <span className="hint">USDC if ≤</span>
-          <input className="chip mono" type="number" min={0} placeholder={p?.tokenPriceUsd ? (p.tokenPriceUsd * 0.9).toFixed(0) : "price"} value={trigger.price} onChange={(e) => setTrigger({ ...trigger, price: e.target.value })} style={{ width: 96 }} />
-          <button className="btn amber sm" disabled={!canTrade || busy != null || !Number(trigger.price)} onClick={doTrigger}>{busy === "trigger" ? "…" : "Set trigger"}</button>
-        </div>
-        {status && !status.jupiterKey ? <div className="hint" style={{ marginTop: 4 }}>Trigger orders run in simulated mode until a JUPITER_API_KEY is configured.</div> : null}
 
-        {/* Street view */}
+        {/* A conditional order is a deliberate act, not something to trip over. */}
+        <Section title="Limit order">
+          <div className="row">
+            <span className="hint">Buy</span>
+            <input className="chip mono" type="number" min={1} value={trigger.amount} onChange={(e) => setTrigger({ ...trigger, amount: e.target.value })} style={{ width: 80 }} />
+            <span className="hint">USDC if ≤</span>
+            <input className="chip mono" type="number" min={0} placeholder={p?.tokenPriceUsd ? (p.tokenPriceUsd * 0.9).toFixed(0) : "price"} value={trigger.price} onChange={(e) => setTrigger({ ...trigger, price: e.target.value })} style={{ width: 96 }} />
+            <button className="btn amber sm" disabled={!canTrade || busy != null || !Number(trigger.price)} onClick={doTrigger}>{busy === "trigger" ? "…" : "Set trigger"}</button>
+          </div>
+          {status && !status.jupiterKey ? <div className="hint" style={{ marginTop: 6 }}>Trigger orders run in simulated mode until a JUPITER_API_KEY is configured.</div> : null}
+        </Section>
+
+        {/* Location and the curve studio: both secondary to price and trade. */}
         {co.headquarters ? (
-          <>
-            <div className="divider" />
+          <Section title="Location & tools">
             <div className="row">
               <span className="hint">HQ · {co.headquarters.name}</span>
               <span className="spacer" />
               <button className="btn ghost sm" onClick={() => showStreetView(streetView === co.id ? null : co.id)}>{streetView === co.id ? "Hide" : "Street View"}</button>
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn ghost sm" onClick={() => showDbcStudio(co.id, "user")} title={`Design a Meteora bonding curve anchored on ${co.name}'s reference price`}>Design a curve</button>
             </div>
             {streetView === co.id ? (
               status?.streetView && !svFailed ? (
@@ -234,7 +331,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
                 </div>
               ) : <div className="hint" style={{ marginTop: 6 }}>{svFailed ? "No Street View imagery here — showing the map marker instead." : "Street View needs GOOGLE_MAPS_API_KEY on the server; showing the map marker."}</div>
             ) : null}
-          </>
+          </Section>
         ) : null}
 
         {/* News + impact */}

@@ -21,6 +21,7 @@ import { sessionPill, startSessionPolling, useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
 import { cancelAnnouncement, cancelTrigger, confirmTrade, confirmTrigger, describeIntent, describeRule, feeSummary, isGated, orderStatusLabel, prepareTrade, prepareTrigger, tradeConfirmedAnnouncement } from "@/solana/trade";
 import { recenterXR, xrGlobe } from "./CameraRig";
+import { useHandheld } from "./handheld";
 import { FONT_BODY, FONT_BOLD, FONT_NUM, latinText } from "./fonts";
 import { GlassRect, UNIT_PLANE, type GlassMaterial } from "./glass";
 import { Icon, type IconName } from "./icons";
@@ -223,35 +224,61 @@ function CompanyHolo({ companyId }: { companyId: string }) {
   const W = 1.04, H = 0.5;
   const triggerPrice = p?.tokenPriceUsd ? Math.round(p.tokenPriceUsd * 0.9) : 0;
 
+  /* A private company has no exchange series, so there is nothing to plot. The
+   * plane used to mount anyway and left a hole in the middle of the cluster,
+   * with range pills under it that changed nothing. Skip both and lift
+   * everything below the chart into the space it would have taken. */
+  const isPrivate = Boolean(co.private) || p?.underlyingSource === "issuer-mark";
+  const lift = isPrivate ? 0.42 : 0;
+  const premium = p?.premiumToMarkPct ?? null;
+
   return (
     <group>
-      {/* Header above the chart */}
+      {/* The glass card shrinks with the cluster: without a chart there is
+          0.42 less to back, and its centre rises by half that. */}
+      <Card w={W + 0.12} h={1.1 - lift} y={-0.06 + lift / 2} accent={C.cyan} fill={0.5} />
+      {/* Header. The onchain price leads, as it does in the DOM panel: it is
+          what a buy actually costs. The reference sits under it. */}
       <Label position={[-W / 2, 0.42, 0]} text={co.name.toUpperCase()} size={0.056} color="#ffffff" />
-      <Label position={[-W / 2, 0.36, 0]} text={`${co.ticker} · ${co.tokenSymbol} · ${co.sector} · ${COUNTRIES[co.countryCode].name}`} size={0.022} color="#b8c7da" />
-      <Label position={[W / 2, 0.42, 0]} text={fmtUsd(p?.underlyingPriceUsd)} size={0.062} color="#ffffff" anchorX="right" mono />
-      <Label position={[W / 2, 0.36, 0]} text={`token ${fmtUsd(p?.tokenPriceUsd)}  ${fmtPct(ch)}`} size={0.024} color={ch == null ? "#b8c7da" : ch >= 0 ? C.solGreen : C.magenta} anchorX="right" mono />
+      <Label position={[-W / 2, 0.36, 0]} text={`${co.ticker} · ${co.sector}`} size={0.022} color="#b8c7da" />
+      <Label position={[W / 2, 0.42, 0]} text={fmtUsd(p?.tokenPriceUsd)} size={0.062} color="#ffffff" anchorX="right" mono />
+      <Label
+        position={[W / 2, 0.36, 0]}
+        text={isPrivate
+          ? `mark ${fmtUsd(p?.markPriceUsd)}${premium != null ? `  ${premium >= 0 ? "+" : ""}${premium.toFixed(1)}% vs mark` : ""}`
+          : `underlying ${fmtUsd(p?.underlyingPriceUsd)}  ${fmtPct(ch)}`}
+        size={0.024}
+        color={isPrivate ? (premium == null ? "#b8c7da" : premium >= 0 ? C.solGreen : C.magenta) : ch == null ? "#b8c7da" : ch >= 0 ? C.solGreen : C.magenta}
+        anchorX="right"
+        mono
+      />
 
-      {/* The chart itself — transparent, no backdrop */}
-      <group position={[0, 0.06, 0]}><ChartPlane companyId={companyId} w={W} h={H} /></group>
+      {/* The chart itself — transparent, no backdrop. Listed companies only. */}
+      {isPrivate ? (
+        <Label position={[-W / 2, 0.28, 0]} text={`Private company · trades 24/7 · no exchange price history`} size={0.022} color="#8ea3bd" maxWidth={W} />
+      ) : (
+        <group position={[0, 0.06, 0]}><ChartPlane companyId={companyId} w={W} h={H} /></group>
+      )}
 
       {/* Stats line under the chart */}
-      <Label position={[-W / 2, -0.23, 0]} text={pos ? `Position ${pos.amountUi.toFixed(4)} ${pos.symbol} · ${fmtUsd(pos.valueUsd)}` : auth.authenticated ? "No position" : "Not signed in · Buy opens sign-in"} size={0.022} color="#dfe9f5" />
-      {active[0] ? <Label position={[-W / 2, -0.265, 0]} icon="order" text={`LIMIT ORDER · JUPITER · ${describeRule(active[0])}`} size={0.021} color={C.gold} /> : null}
+      <Label position={[-W / 2, -0.23 + lift, 0]} text={pos ? `Position ${pos.amountUi.toFixed(4)} ${pos.symbol} · ${fmtUsd(pos.valueUsd)}` : auth.authenticated ? "No position" : "Not signed in · Buy opens sign-in"} size={0.022} color="#dfe9f5" />
+      {active[0] ? <Label position={[-W / 2, -0.265 + lift, 0]} icon="order" text={`LIMIT ORDER · JUPITER · ${describeRule(active[0])}`} size={0.021} color={C.gold} /> : null}
       {impact && impact.companyId === companyId ? (
-        <Label position={[-W / 2, -0.302, 0]} text={clip(`${impact.impact.replace("_", " ").toUpperCase()} · ${(impact.confidence * 100).toFixed(0)}% · ${impact.event}`, 84)} size={0.021} color={impact.impact === "potentially_negative" ? C.magenta : impact.impact === "potentially_positive" ? C.solGreen : C.amber} maxWidth={W} />
+        <Label position={[-W / 2, -0.302 + lift, 0]} text={clip(`${impact.impact.replace("_", " ").toUpperCase()} · ${(impact.confidence * 100).toFixed(0)}% · ${impact.event}`, 84)} size={0.021} color={impact.impact === "potentially_negative" ? C.magenta : impact.impact === "potentially_positive" ? C.solGreen : C.amber} maxWidth={W} />
       ) : null}
-      {items.map((n, i) => <Label key={n.id} position={[-W / 2, -0.34 - i * 0.034, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 80)} size={0.021} color="#c7d7ea" maxWidth={W} />)}
+      {items.map((n, i) => <Label key={n.id} position={[-W / 2, -0.34 + lift - i * 0.034, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 80)} size={0.021} color="#c7d7ea" maxWidth={W} />)}
 
       {/* Assistant buttons floating beneath */}
-      <group position={[0, -0.46, 0.01]}>
+      <group position={[0, -0.46 + lift, 0.01]}>
         <Pill position={[-0.36, 0, 0]} w={0.2} icon={holding ? "dot" : undefined} label={holding ? "Listening" : voiceState === "connecting" ? "Connecting" : "Hold · Talk"} accent={holding ? C.violet : C.sol} active={holding} onHoldStart={() => setHold(true, auth)} onHoldEnd={() => setHold(false)} />
         <Pill position={[-0.135, 0, 0]} w={0.2} label="Buy $100" accent={C.solGreen} disabled={!canTrade} onClick={() => void prepareTrade(auth, companyId, "buy", 100).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
         <Pill position={[0.09, 0, 0]} w={0.2} label="Sell all" accent={C.magenta} disabled={!canTrade || !pos} onClick={() => pos && void prepareTrade(auth, companyId, "sell", pos.amountUi).then((r) => { if (!r.ok && !isGated(r)) setError(r.error); })} />
         <Pill position={[0.315, 0, 0]} w={0.2} label={triggerPrice ? `Buy < $${triggerPrice}` : "Trigger"} accent={C.amber} disabled={!canTrade || !triggerPrice} onClick={() => void prepareTrigger(auth, companyId, "buy_below", triggerPrice, 100).then((r) => { if (!r.ok) setError(r.error); })} />
       </group>
-      <group position={[0, -0.545, 0.01]}>
-        {RANGES.map((r, i) => <Pill key={r} position={[-0.33 + i * 0.13, 0, 0]} w={0.11} label={r} accent={C.frost} active={r === range} onClick={() => setChartRange(r)} />)}
-        <Pill position={[0.27, 0, 0]} w={0.18} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
+      <group position={[0, -0.545 + lift, 0.01]}>
+        {/* Range pills only where a range means something. */}
+        {isPrivate ? null : RANGES.map((r, i) => <Pill key={r} position={[-0.33 + i * 0.13, 0, 0]} w={0.11} label={r} accent={C.frost} active={r === range} onClick={() => setChartRange(r)} />)}
+        <Pill position={[isPrivate ? -0.36 : 0.27, 0, 0]} w={0.18} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
       </group>
     </group>
   );
@@ -259,11 +286,40 @@ function CompanyHolo({ companyId }: { companyId: string }) {
 
 /** Frosted card for confirmations (kept translucent, not opaque): fill, rim and top accent strip in one draw.
  * Hittable, so controller rays stop on the card instead of reaching the globe behind it. */
-function Card({ w, h, accent }: { w: number; h: number; accent: string }) {
+function Card({ w, h, accent, y = 0, fill = 0.72 }: { w: number; h: number; accent: string; y?: number; /** lighter for browse panels, so the room shows through */ fill?: number }) {
   return (
-    <GlassRect position={[0, 0, -0.002]} w={w} h={h} r={0.024} top="#0b0f1c" accent={accent} interactive
-      fill={0.72} rim={0.9} stroke={0.0025} topBar={1} glow={0} sheen={0} bar={0} />
+    <GlassRect position={[0, y, -0.002]} w={w} h={h} r={0.028} top="#0d1224" bottom="#080b16" accent={accent} interactive
+      fill={fill} rim={0.7} stroke={0.0025} topBar={1} glow={0.35} pad={0.05} sheen={0.12} bar={0} />
   );
+}
+
+/** Rises and fades in over ~0.45 s when its key changes, so a cluster arrives with the globe instead of popping. */
+function Rise({ id, children }: { id: string; children: ReactNode }) {
+  const g = useRef<THREE.Group>(null);
+  const t = useRef(0);
+  const done = useRef(false);
+  useEffect(() => { t.current = 0; done.current = false; }, [id]);
+  useFrame((_, dt) => {
+    const grp = g.current;
+    if (!grp) return;
+    t.current = Math.min(1, t.current + dt / 0.45);
+    const k = 1 - Math.pow(1 - t.current, 3);
+    grp.position.y = (1 - k) * -0.06;
+    grp.position.z = (1 - k) * -0.08;
+    grp.scale.setScalar(0.96 + 0.04 * k);
+    if (done.current) return;
+    if (t.current >= 1) done.current = true;
+    grp.traverse((o) => {
+      /* troika Text keeps its opacities on the mesh; glass on a uniform; chart / icon planes on the material. */
+      const tx = o as unknown as { fillOpacity?: number; outlineOpacity?: number };
+      if (typeof tx.fillOpacity === "number") { tx.fillOpacity = k; tx.outlineOpacity = 0.9 * k; return; }
+      const m = (o as THREE.Mesh).material as (THREE.Material & { uniforms?: { uOpacity?: { value: number } } }) | undefined;
+      if (!m) return;
+      if (m.uniforms?.uOpacity) m.uniforms.uOpacity.value = k;
+      else if (m.transparent && m.visible) m.opacity = k;
+    });
+  });
+  return <group ref={g}>{children}</group>;
 }
 
 function Row({ y, label, value, color = "#ffffff", w = 0.76 }: { y: number; label: string; value: string; color?: string; w?: number }) {
@@ -405,14 +461,17 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
   const headlines = news && (news.target === cd.name || news.items.some((n) => n.countryCodes.includes(code))) ? news.items.slice(0, 3) : [];
   const top = 0.05 + ids.length * 0.025 + headlines.length * 0.024;
   const listEnd = top - 0.03 - ids.length * 0.052;
+  const pillY = listEnd - (headlines.length ? 0.09 + headlines.length * 0.042 : 0.03);
+  const cardTop = top + 0.14, cardBottom = pillY - 0.06;
   return (
     <group>
+      <Card w={0.92} h={cardTop - cardBottom} y={(cardTop + cardBottom) / 2} accent={C.cyan} fill={0.5} />
       <Label position={[-0.4, top + 0.09, 0]} text={cd.name.toUpperCase()} size={0.046} color="#ffffff" />
       <Label position={[-0.4, top + 0.04, 0]} text={`${cs?.assetCount ?? 0} tokenized assets · ${cs?.tradableCount ?? 0} live · say a company name or point at it`} size={0.022} color="#b8c7da" />
       {ids.map((id, i) => {
         const co = COMPANY_BY_ID[id]; const p = prices[id]; const ch = p?.change24hPct ?? null;
         return (
-          <RowButton key={id} position={[0, top - 0.03 - i * 0.052, 0.002]} w={0.8} h={0.046} onClick={() => useWorld.getState().focusCompany(id)}>
+          <RowButton key={id} position={[0, top - 0.03 - i * 0.052, 0.002]} w={0.8} h={0.046} onClick={() => useWorld.getState().focusCompany(id, "user")}>
             <Label position={[-0.365, 0, 0.002]} text={`${co.name}  ${co.ticker}`} size={0.022} color="#ffffff" />
             <Label position={[0.38, 0, 0.002]} text={`${fmtUsd(p?.tokenPriceUsd)}  ${fmtPct(ch)}`} size={0.022} color={ch == null ? "#ffffff" : ch >= 0 ? C.solGreen : C.magenta} anchorX="right" mono />
           </RowButton>
@@ -420,7 +479,7 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
       })}
       {headlines.length ? <Label position={[-0.4, listEnd - 0.01, 0]} text={`NEWS · ${cd.name.toUpperCase()}`} size={0.02} color={C.frost} /> : null}
       {headlines.map((n, i) => <Label key={n.id} position={[-0.4, listEnd - 0.05 - i * 0.042, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 62)} size={0.021} color="#c7d7ea" maxWidth={0.8} />)}
-      <Pill position={[0, listEnd - (headlines.length ? 0.09 + headlines.length * 0.042 : 0.03), 0.01]} w={0.22} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
+      <Pill position={[0, pillY, 0.01]} w={0.22} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
     </group>
   );
 }
@@ -465,19 +524,21 @@ function DepositHolo() {
   if (!prompt) return null;
   const have = portfolio?.usdcBalance ?? prompt.haveUsd;
   const addr = auth.address ?? "—";
+  /* Mirrors DepositPanel: no amount attached means "show me my address". */
+  const receiveOnly = prompt.neededUsd <= 0;
   return (
     <group>
       <Card w={0.84} h={0.56} accent={C.solGreen} />
-      <Label position={[-0.38, 0.22, 0.001]} text="FUND YOUR WALLET" size={0.04} color="#ffffff" />
-      <Label position={[-0.38, 0.175, 0.001]} text={`USDC on Solana · ${fmtUsd(Math.max(0, prompt.neededUsd - have))} more needed`} size={0.022} color="#b8c7da" />
+      <Label position={[-0.38, 0.22, 0.001]} text={receiveOnly ? "RECEIVE USDC" : "FUND YOUR WALLET"} size={0.04} color="#ffffff" />
+      <Label position={[-0.38, 0.175, 0.001]} text={receiveOnly ? "USDC on Solana" : `USDC on Solana · ${fmtUsd(Math.max(0, prompt.neededUsd - have))} more needed`} size={0.022} color="#b8c7da" />
       <Row y={0.11} label="Wallet USDC" value={fmtUsd(have)} />
-      <Row y={0.065} label="This trade needs" value={fmtUsd(prompt.neededUsd)} />
+      {receiveOnly ? null : <Row y={0.065} label="This trade needs" value={fmtUsd(prompt.neededUsd)} />}
       <Label position={[-0.38, 0.005, 0.001]} text="SEND USDC (SOLANA) TO" size={0.02} color="#b8c7da" />
       <Label position={[-0.38, -0.03, 0.001]} text={addr.slice(0, 22)} size={0.024} color={C.solGreen} />
       <Label position={[-0.38, -0.062, 0.001]} text={addr.slice(22)} size={0.024} color={C.solGreen} />
       <Label position={[-0.38, -0.115, 0.001]} text={`Solana network only; keep ~0.01 SOL for fees. Copy the address from the desktop panel.${prompt.resume ? " The trade continues when the USDC lands." : ""}`} size={0.021} color="#b8c7da" maxWidth={0.76} />
-      <Pill position={[-0.19, -0.2, 0.002]} w={0.24} label="Later" accent={C.frost} onClick={() => setPrompt(null)} />
-      <Pill position={[0.19, -0.2, 0.002]} w={0.24} label="I've sent it" accent={C.solGreen} onClick={() => void loadPortfolio()} />
+      <Pill position={[-0.19, -0.2, 0.002]} w={0.24} label={receiveOnly ? "Done" : "Later"} accent={C.frost} onClick={() => setPrompt(null)} />
+      <Pill position={[0.19, -0.2, 0.002]} w={0.24} label={receiveOnly ? "Refresh" : "I've sent it"} accent={C.solGreen} onClick={() => void loadPortfolio()} />
     </group>
   );
 }
@@ -503,7 +564,9 @@ function useAboveGlobe(ref: RefObject<THREE.Group | null>) {
     if (!g) return;
     const { pos, scale } = xrGlobe;
     const y = pos.y + scale + CAPTION_GAP;
-    g.position.set(pos.x + 0.06, Math.min(y, CAPTION_MAX_Y), pos.z + scale * (y > CAPTION_MAX_Y ? 1.05 : 0.35));
+    if (y <= CAPTION_MAX_Y) g.position.set(pos.x + 0.06, y, pos.z + scale * 0.35);
+    /* Too tall to stack on: slide in front of and up-left of the planet, clear of the country labels on its crown. */
+    else g.position.set(pos.x - scale * 0.55, CAPTION_MAX_Y, pos.z + scale * 1.05);
   });
 }
 
@@ -520,13 +583,19 @@ function Captions() {
     : state === "speaking" ? "SPEAKING · HOLD  A  TO INTERRUPT"
     : state === "thinking" ? "THINKING…"
     : "HOLD  A  TO SPEAK";
+  /* Backing chip sized from the laid-out text block, so it hugs one line or five. */
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
+  const onSync = (m: { textRenderInfo?: { blockBounds: number[] } }) => { const b = m.textRenderInfo?.blockBounds; if (b) setBox({ w: b[2] - b[0], h: b[3] - b[1] }); };
   return (
     <group ref={ref}>
       {/* Status line hugs the globe; captions stack upward from it (bottom-anchored so wrapping grows up). */}
       {last.length ? (
-        <Text font={FONT_BODY} position={[0, 0.03, 0]} fontSize={0.026} color="#e8f4ff" anchorX="center" anchorY="bottom" maxWidth={1.1} textAlign="center" lineHeight={1.35} {...OUTLINE}>
-          {last.map((c) => `${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-200)}`).join("\n")}
-        </Text>
+        <group>
+          {box ? <GlassRect position={[0, 0.03 + box.h / 2, -0.003]} w={box.w + 0.08} h={box.h + 0.05} r={0.024} top="#0d1224" bottom="#080b16" accent={C.cyan} fill={0.55} rim={0.45} stroke={0.002} topBar={0} glow={0.2} pad={0.03} sheen={0} bar={0} /> : null}
+          <Text font={FONT_BODY} position={[0, 0.03, 0]} fontSize={0.025} color="#e8f4ff" anchorX="center" anchorY="bottom" maxWidth={1.0} textAlign="center" lineHeight={1.35} onSync={onSync} {...OUTLINE}>
+            {last.map((c) => `${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-160)}`).join("\n")}
+          </Text>
+        </group>
       ) : null}
       <Text font={FONT_BOLD} position={[0, 0, 0]} fontSize={0.02} color={holding ? C.violet : state === "speaking" ? C.solGreen : state === "thinking" ? C.amber : "#b8c7da"} anchorX="center" anchorY="middle" letterSpacing={0.2} {...OUTLINE}>
         {status}
@@ -644,6 +713,7 @@ function IdleHint() {
   const pill = session ? sessionPill(session) : null;
   return (
     <group>
+      <Card w={0.96} h={0.28} y={-0.02} accent={C.sol} fill={0.45} />
       <Label position={[0, 0.06, 0]} text="RHEA" size={0.05} color="#ffffff" anchorX="center" />
       <Label position={[0, 0.005, 0]} text={overview ? `${overview.assets.length} tokenized stocks · ${overview.countries.length} countries · live on Solana` : "loading market…"} size={0.022} color="#b8c7da" anchorX="center" />
       {pill ? <Label position={[0, -0.095, 0]} text={pill.long} size={0.021} color={pill.open ? C.solGreen : C.gold} anchorX="center" /> : null}
@@ -676,17 +746,21 @@ function ResultCues() {
 
 export function XRPanels() {
   const mode = useXR((s) => s.mode);
+  /* Phones keep the DOM HUD on screen (dom-overlay), so the in-world panels stay out of the way. */
+  const handheld = useHandheld((s) => s.active === "webxr");
   const focusedCompany = useWorld((s) => s.focusedCompany);
   const focusedCountry = useWorld((s) => s.focusedCountry);
   const pendingTrade = useMarket((s) => s.pendingTrade);
   const pendingOrder = useMarket((s) => s.pendingOrder);
   const loginPrompt = useMarket((s) => s.loginPrompt);
   const depositPrompt = useMarket((s) => s.depositPrompt);
-  if (mode == null) return null;
+  if (mode == null || handheld) return null;
   return (
     <group>
       <group position={CLUSTER_POS} rotation={CLUSTER_ROT}>
-        {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : depositPrompt ? <DepositHolo /> : loginPrompt ? <LoginHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
+        <Rise id={pendingTrade ? `trade:${pendingTrade.id}` : pendingOrder ? `order:${pendingOrder.id}` : depositPrompt ? "deposit" : loginPrompt ? "login" : focusedCompany ? `co:${focusedCompany}` : focusedCountry ? `cc:${focusedCountry}` : "idle"}>
+          {pendingTrade ? <TradeHolo /> : pendingOrder ? <OrderHolo /> : depositPrompt ? <DepositHolo /> : loginPrompt ? <LoginHolo /> : focusedCompany ? <CompanyHolo companyId={focusedCompany} /> : focusedCountry ? <CountryHolo code={focusedCountry} /> : <IdleHint />}
+        </Rise>
       </group>
       <Captions />
       <VoiceOrb />
