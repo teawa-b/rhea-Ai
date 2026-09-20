@@ -44,28 +44,60 @@ a { color: var(--frost); }
 .topbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* ---------- chips / buttons ---------- */
-.chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid rgba(63,224,255,0.28); color: var(--text); font-size: 12px; letter-spacing: 0.06em; backdrop-filter: blur(10px); box-shadow: inset 0 0 0 1px rgba(63,224,255,0.08); white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 13px; border-radius: 999px; background: var(--panel); border: 1px solid rgba(63,224,255,0.28); color: var(--text); font-size: 12px; letter-spacing: 0.06em; backdrop-filter: blur(10px); box-shadow: inset 0 0 0 1px rgba(63,224,255,0.08); white-space: nowrap; }
 .chip.dim { opacity: 0.7; }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 8px currentColor; }
 .chip .dot.on { background: var(--green); color: var(--green); }
 .chip .dot.warn { background: var(--amber); color: var(--amber); }
 .chip .dot.err { background: var(--red); color: var(--red); }
 .chip .dot.live { background: var(--cyan); color: var(--cyan); animation: pulse 1.4s infinite; }
-.chip.sol { border-color: rgba(153,69,255,0.55); background: linear-gradient(90deg, rgba(153,69,255,0.18), rgba(20,241,149,0.08)); box-shadow: 0 0 14px rgba(153,69,255,0.25); }
+.chip.sol { border-color: rgba(153,69,255,0.5); background: rgba(153,69,255,0.14); }
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.5); opacity: .55 } }
 
-.btn { cursor: pointer; border: 1px solid rgba(63,224,255,0.45); background: linear-gradient(180deg, rgba(63,224,255,0.16), rgba(63,224,255,0.06)); color: #fff; padding: 9px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; transition: transform .1s, box-shadow .15s, background .15s; box-shadow: var(--glow); }
-.btn:hover { background: linear-gradient(180deg, rgba(63,224,255,0.28), rgba(63,224,255,0.1)); }
+/* Buttons.
+ *
+ * Every action used to carry its own hue and its own coloured glow — cyan
+ * base, a three-stop purple-to-green Buy, magenta Sell, amber trigger — so a
+ * single row of controls put four competing colours on screen and none of them
+ * meant anything. Colour now marks rank, not identity: one filled accent for
+ * the primary action in a view, quiet glass for everything else, and red only
+ * where something is destructive, and only once you reach for it.
+ *
+ * Capsules throughout, matching the pills the headset panels already use. */
+.btn {
+  cursor: pointer;
+  border: 1px solid rgba(143,232,255,0.22);
+  background: rgba(143,232,255,0.06);
+  color: #dfe9f5;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  transition: transform .1s, border-color .15s, background .15s, color .15s;
+}
+.btn:hover { background: rgba(143,232,255,0.12); border-color: rgba(143,232,255,0.4); color: #fff; }
 .btn:active { transform: scale(0.97); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
-.btn.primary { border-color: var(--cyan); background: linear-gradient(180deg, rgba(63,224,255,0.42), rgba(10,126,164,0.4)); }
-.btn.sol { border-color: transparent; background: linear-gradient(90deg, var(--sol), #6d3df0 55%, var(--sol-green)); color: #fff; box-shadow: 0 0 18px rgba(153,69,255,0.45); text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
-.btn.sol:hover { filter: brightness(1.12); }
-.btn.ghost { background: transparent; box-shadow: none; border-color: rgba(143,232,255,0.25); color: var(--frost); }
-.btn.danger { border-color: rgba(255,46,136,0.6); background: linear-gradient(180deg, rgba(255,46,136,0.25), rgba(255,46,136,0.08)); box-shadow: 0 0 14px rgba(255,46,136,0.2); }
-.btn.amber { border-color: rgba(255,178,32,0.7); background: linear-gradient(180deg, rgba(255,178,32,0.3), rgba(255,178,32,0.08)); box-shadow: 0 0 14px rgba(255,178,32,0.25); }
-.btn.sm { padding: 6px 10px; font-size: 11px; }
-.btn.icon { padding: 8px; display: inline-grid; place-items: center; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:disabled:hover { background: rgba(143,232,255,0.06); border-color: rgba(143,232,255,0.22); color: #dfe9f5; }
+
+/* The one filled action. Flat Solana purple — no gradient ramp, no glow, no
+   text shadow; it reads as primary because nothing else is filled. */
+.btn.sol, .btn.primary {
+  border-color: transparent; background: var(--sol); color: #fff;
+}
+.btn.sol:hover, .btn.primary:hover { background: #a85cff; border-color: transparent; color: #fff; }
+
+/* Destructive: neutral at rest so it does not shout beside the primary, red
+   once the pointer is on it. */
+.btn.danger { color: #ff8ab8; border-color: rgba(255,46,136,0.28); background: transparent; }
+.btn.danger:hover { background: rgba(255,46,136,0.14); border-color: rgba(255,46,136,0.55); color: #ffd3e4; }
+
+/* Amber marks a conditional order without filling the button. */
+.btn.amber { color: var(--gold); border-color: rgba(255,178,32,0.3); background: transparent; }
+.btn.amber:hover { background: rgba(255,178,32,0.12); border-color: rgba(255,178,32,0.55); color: #ffe6ad; }
+
+.btn.ghost { background: transparent; border-color: rgba(143,232,255,0.18); color: var(--frost); }
+.btn.sm { padding: 6px 13px; font-size: 11px; }
+.btn.icon { padding: 8px; border-radius: 999px; display: inline-grid; place-items: center; }
 
 select.chip, input.chip { appearance: none; -webkit-appearance: none; cursor: pointer; }
 select.chip option { background: var(--panel-solid); }
@@ -175,8 +207,8 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
 .chart-wrap { position: relative; }
 .chart-wrap canvas { width: 100%; height: 190px; display: block; border-radius: 8px; background: rgba(5,6,13,0.55); border: 1px solid rgba(63,224,255,0.14); }
 .ranges { display: flex; gap: 4px; margin-top: 6px; }
-.ranges button { flex: 1; cursor: pointer; background: transparent; border: 1px solid rgba(63,224,255,0.16); color: var(--muted); padding: 5px 0; border-radius: 6px; font-size: 11px; letter-spacing: 0.1em; font-weight: 700; }
-.ranges button.on { color: #fff; border-color: var(--cyan); background: rgba(63,224,255,0.14); }
+.ranges button { flex: 1; cursor: pointer; background: transparent; border: 1px solid rgba(143,232,255,0.16); color: var(--muted); padding: 5px 0; border-radius: 999px; font-size: 11px; letter-spacing: 0.1em; font-weight: 700; }
+.ranges button.on { color: #fff; border-color: transparent; background: rgba(143,232,255,0.16); }
 
 /* ---------- news / impact ---------- */
 .nw { position: relative; }
