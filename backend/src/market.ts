@@ -17,6 +17,7 @@ import { JupiterError, executeSwap, getPrices, getSwapQuote, hasJupiterKey, list
 import { PRESTOCKS_DISCLOSURE, impliedValuation, preStocksCatalog, premiumToMark } from "./prestocks";
 import { DBC_PRESETS, DEFAULT_PRESET, dbcPoolStatus, planEquityCurve } from "./meteora";
 import { corporateActions, proofOfReserves, type XCorporateAction } from "./xstocks";
+import { faviconFor, newsFor } from "./news";
 
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -477,6 +478,21 @@ export function marketRouter(): Router {
   r.get("/overview", async (_req, res) => {
     try { res.json(await buildOverview()); }
     catch (e) { bad(res, 502, (e as Error).message); }
+  });
+
+  /* ---- Headline wire + source favicons (news.ts) ---- */
+  r.get("/news", async (req, res) => {
+    const q = String(req.query.q ?? "").trim();
+    if (!q) return bad(res, 400, "q required");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({ items: await newsFor(q) });
+  });
+  r.get("/favicon", async (req, res) => {
+    const icon = await faviconFor(String(req.query.domain ?? ""));
+    if (!icon) return res.status(404).end();
+    res.setHeader("Content-Type", icon.type);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.end(icon.body);
   });
 
   /* ---- Meteora DBC studio (read-only) ---- *

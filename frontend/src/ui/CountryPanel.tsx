@@ -19,6 +19,7 @@ export function CountryPanel({ code }: { code: CountryCode }) {
   const focusCompany = useWorld((s) => s.focusCompany);
   const resetGlobe = useWorld((s) => s.resetGlobe);
   const news = useWorld((s) => s.news);
+  const newsPending = useWorld((s) => s.newsPending);
 
   const cs = overview?.countries.find((c) => c.code === code);
   const ids = cs?.companies ?? [];
@@ -65,7 +66,8 @@ export function CountryPanel({ code }: { code: CountryCode }) {
             );
           })}
         </div>
-        {countryNews.length ? (<><div className="divider" /><NewsCards items={countryNews} label={cd.name} /></>) : null}
+        {countryNews.length ? (<><div className="divider" /><NewsCards items={countryNews} label={cd.name} /></>)
+          : newsPending === cd.name ? (<><div className="divider" /><div className="hint wire-wait"><i />Searching the wire for {cd.name}…</div></>) : null}
       </div>
     </div>
   );

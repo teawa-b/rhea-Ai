@@ -474,6 +474,11 @@ button.crumb.details:hover { background: rgba(63,224,255,0.28); }
 .ar-btn { gap: 6px; margin-left: auto; border-color: rgba(63,224,255,0.45); }
 .ar-btn:disabled { opacity: 0.6; }
 
+/* "Searching the wire…" while headlines load: the live dot, blinking. */
+.wire-wait { display: flex; align-items: center; gap: 8px; }
+.wire-wait i { width: 7px; height: 7px; border-radius: 50%; background: var(--sol-green); box-shadow: 0 0 8px var(--sol-green); animation: wire-blink 1.1s ease-in-out infinite; }
+@keyframes wire-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
 /* Company logo chips in panel lists */
 .co-logo { flex: none; border-radius: 7px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px rgba(63,224,255,0.25), 0 0 10px rgba(153,69,255,0.18); }
 .co-logo.mono-logo { display: grid; place-items: center; font-weight: 800; letter-spacing: 0.02em; color: #fff; background: linear-gradient(135deg, var(--sol), var(--cyan-deep)); }

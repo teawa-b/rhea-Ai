@@ -56,6 +56,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const status = useMarket((s) => s.status);
   const setError = useMarket((s) => s.setError);
   const news = useWorld((s) => s.news);
+  const newsPending = useWorld((s) => s.newsPending);
   const impact = useWorld((s) => s.impact);
   const streetView = useWorld((s) => s.streetViewCompany);
   const showStreetView = useWorld((s) => s.showStreetView);
@@ -336,7 +337,8 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
 
         {/* News + impact */}
         {impact && impact.companyId === co.id ? (<><div className="divider" /><ImpactCard impact={impact} /></>) : null}
-        {companyNews.length ? (<><div className="divider" /><NewsCards items={companyNews} label={countryNews ? COUNTRIES[co.countryCode].name : co.ticker} /></>) : null}
+        {companyNews.length ? (<><div className="divider" /><NewsCards items={companyNews} label={countryNews ? COUNTRIES[co.countryCode].name : co.ticker} /></>)
+          : newsPending === co.name ? (<><div className="divider" /><div className="hint wire-wait"><i />Searching the wire for {co.ticker}…</div></>) : null}
       </div>
     </div>
   );

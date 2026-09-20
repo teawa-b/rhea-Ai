@@ -24,9 +24,13 @@ import { recenterXR, xrGlobe } from "./CameraRig";
 import { useHandheld } from "./handheld";
 import { FONT_BODY, FONT_BOLD, FONT_NUM, latinText } from "./fonts";
 import { GlassRect, UNIT_PLANE, type GlassMaterial } from "./glass";
+import { HoloFrame } from "./holoframe";
+import { useLogoTexture } from "./logoTexture";
+import { api } from "@/market/api";
+import type { NewsEvent } from "@shared/types";
 import { Icon, type IconName } from "./icons";
 import { buzz, cue, feel } from "./xrFeedback";
-import { C, fmtEt, fmtPct, fmtSeconds, fmtUsd, shortSig } from "@/theme";
+import { C, fmtAge, fmtEt, fmtPct, fmtSeconds, fmtUsd, shortSig } from "@/theme";
 import { drawChart } from "@/ui/chartDraw";
 
 /* Chart cluster: eye level, right of the globe, turned slightly toward the user. */
@@ -194,6 +198,56 @@ function ChartPlane({ companyId, w, h }: { companyId: string; w: number; h: numb
   );
 }
 
+/* ---------------- Headline wire (in-headset) ----------------
+ * A story is a glass strip: the source's favicon (proxied by the API so WebGL
+ * can load it), the headline, and source · age beneath. The accent bar is
+ * green while the story is under a day old. The header carries a live dot. */
+const NEWS_ROW_H = 0.046, NEWS_ROW_GAP = 0.05;
+const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
+
+function NewsRow({ n, y, w }: { n: NewsEvent; y: number; w: number }) {
+  const host = hostOf(n.sourceUrl ?? n.url);
+  const icon = useLogoTexture(host ? api.faviconUrl(host) : undefined);
+  const at = Date.parse(n.publishedAt);
+  const fresh = Number.isFinite(at) && Date.now() - at < 86_400_000;
+  const accent = fresh ? C.solGreen : C.cyan;
+  const tile = NEWS_ROW_H - 0.018;
+  const textX = -w / 2 + 0.022 + tile + 0.014;
+  const top = useMemo(() => PANEL_DARK.clone().lerp(new THREE.Color(accent), 0.1), [accent]);
+  return (
+    <group position={[0, y, 0.002]}>
+      <GlassRect w={w} h={NEWS_ROW_H} r={0.01} top={top} bottom={PANEL_DARK} accent={accent} stroke={0.002} fill={0.5} rim={0.22} bar={1} barGeo={[0.01, 0.0022, NEWS_ROW_H * 0.3]} glow={0} sheen={0} topBar={0} />
+      <group position={[-w / 2 + 0.022 + tile / 2, 0, 0.001]}>
+        {icon ? (
+          <>
+            <mesh position={[0, 0, -0.0003]}><planeGeometry args={[tile + 0.004, tile + 0.004]} /><meshBasicMaterial color="#ffffff" transparent opacity={0.92} toneMapped={false} /></mesh>
+            <mesh><planeGeometry args={[tile, tile]} /><meshBasicMaterial map={icon} transparent toneMapped={false} /></mesh>
+          </>
+        ) : (
+          <>
+            <mesh><planeGeometry args={[tile, tile]} /><meshBasicMaterial color={accent} transparent opacity={0.28} toneMapped={false} /></mesh>
+            <Text font={FONT_BOLD} position={[0, 0, 0.001]} fontSize={0.016} color="#ffffff" anchorX="center" anchorY="middle" raycast={NO_RAYCAST}>{(n.source || host || "?").slice(0, 1).toUpperCase()}</Text>
+          </>
+        )}
+      </group>
+      <Label position={[textX, 0.0075, 0.001]} text={clip(n.title, 62)} size={0.019} color="#ffffff" />
+      <Label position={[textX, -0.0125, 0.001]} text={`${n.source || host}${Number.isFinite(at) ? ` · ${fmtAge(n.publishedAt)}` : ""}`} size={0.0145} color={fresh ? C.solGreen : "#8ea3bd"} />
+    </group>
+  );
+}
+
+/** "LIVE WIRE · SINGAPORE · 3 stories" with a breathing green dot; or the searching line while the wire loads. */
+function WireHead({ y, x, label, count, searching }: { y: number; x: number; label: string; count: number; searching?: boolean }) {
+  const dot = useRef<THREE.Mesh>(null);
+  useFrame((s) => { if (dot.current) { const k = 0.6 + 0.4 * Math.sin(s.clock.elapsedTime * (searching ? 5 : 2.2)); dot.current.scale.setScalar(k); (dot.current.material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.5 * k; } });
+  return (
+    <group position={[x, y, 0]}>
+      <mesh ref={dot} position={[0.006, 0, 0]} raycast={NO_RAYCAST}><circleGeometry args={[0.0045, 20]} /><meshBasicMaterial color={C.solGreen} transparent toneMapped={false} /></mesh>
+      <Label position={[0.018, 0, 0]} text={searching ? `SEARCHING THE WIRE · ${label.toUpperCase()}…` : `LIVE WIRE · ${label.toUpperCase()} · ${count} ${count === 1 ? "STORY" : "STORIES"}`} size={0.017} color={C.frost} />
+    </group>
+  );
+}
+
 /** The floating company cluster: header · chart · stats · buttons beneath. */
 function CompanyHolo({ companyId }: { companyId: string }) {
   const co = COMPANY_BY_ID[companyId];
@@ -205,6 +259,7 @@ function CompanyHolo({ companyId }: { companyId: string }) {
   const setError = useMarket((s) => s.setError);
   const impact = useWorld((s) => s.impact);
   const news = useWorld((s) => s.news);
+  const newsPending = useWorld((s) => s.newsPending);
   const range = useWorld((s) => s.chartRange);
   const setChartRange = useWorld((s) => s.setChartRange);
   const voiceState = useVoice((s) => s.state);
@@ -236,7 +291,7 @@ function CompanyHolo({ companyId }: { companyId: string }) {
     <group>
       {/* The glass card shrinks with the cluster: without a chart there is
           0.42 less to back, and its centre rises by half that. */}
-      <Card w={W + 0.12} h={1.1 - lift} y={-0.06 + lift / 2} accent={C.cyan} fill={0.5} />
+      <Frame w={W + 0.14} h={1.12 - lift} y={-0.06 + lift / 2} />
       {/* Header. The onchain price leads, as it does in the DOM panel: it is
           what a buy actually costs. The reference sits under it. */}
       <Label position={[-W / 2, 0.42, 0]} text={co.name.toUpperCase()} size={0.056} color="#ffffff" />
@@ -266,7 +321,8 @@ function CompanyHolo({ companyId }: { companyId: string }) {
       {impact && impact.companyId === companyId ? (
         <Label position={[-W / 2, -0.302 + lift, 0]} text={clip(`${impact.impact.replace("_", " ").toUpperCase()} · ${(impact.confidence * 100).toFixed(0)}% · ${impact.event}`, 84)} size={0.021} color={impact.impact === "potentially_negative" ? C.magenta : impact.impact === "potentially_positive" ? C.solGreen : C.amber} maxWidth={W} />
       ) : null}
-      {items.map((n, i) => <Label key={n.id} position={[-W / 2, -0.34 + lift - i * 0.034, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 80)} size={0.021} color="#c7d7ea" maxWidth={W} />)}
+      {items.map((n, i) => <NewsRow key={n.id} n={n} y={-0.345 + lift - i * NEWS_ROW_GAP} w={W} />)}
+      {!items.length && newsPending === co.name ? <WireHead x={-W / 2} y={-0.34 + lift} label={co.ticker} count={0} searching /> : null}
 
       {/* Assistant buttons floating beneath */}
       <group position={[0, -0.46 + lift, 0.01]}>
@@ -286,11 +342,16 @@ function CompanyHolo({ companyId }: { companyId: string }) {
 
 /** Frosted card for confirmations (kept translucent, not opaque): fill, rim and top accent strip in one draw.
  * Hittable, so controller rays stop on the card instead of reaching the globe behind it. */
-function Card({ w, h, accent, y = 0, fill = 0.72 }: { w: number; h: number; accent: string; y?: number; /** lighter for browse panels, so the room shows through */ fill?: number }) {
+function Card({ w, h, accent }: { w: number; h: number; accent: string }) {
   return (
-    <GlassRect position={[0, y, -0.002]} w={w} h={h} r={0.028} top="#0d1224" bottom="#080b16" accent={accent} interactive
-      fill={fill} rim={0.7} stroke={0.0025} topBar={1} glow={0.35} pad={0.05} sheen={0.12} bar={0} />
+    <GlassRect position={[0, 0, -0.002]} w={w} h={h} r={0.024} top="#0b0f1c" accent={accent} interactive
+      fill={0.72} rim={0.9} stroke={0.0025} topBar={1} glow={0} sheen={0} bar={0} />
   );
+}
+
+/** Browse clusters (company, country, idle) are text standing in the room; the frame only marks their space. */
+function Frame({ w, h, y = 0, accent = C.cyan }: { w: number; h: number; y?: number; accent?: string }) {
+  return <HoloFrame position={[0, y, -0.004]} w={w} h={h} accent={accent} interactive />;
 }
 
 /** Rises and fades in over ~0.45 s when its key changes, so a cluster arrives with the globe instead of popping. */
@@ -369,32 +430,34 @@ function TradeHolo() {
   const receipt = pending.status === "confirmed" && pending.signature ? pending.signature : null;
   return (
     <group>
-      <Card w={0.84} h={0.66} accent={accent} />
-      <Label position={[-0.38, 0.28, 0.001]} text={`${pending.side.toUpperCase()} ${co.tokenSymbol}`} size={0.042} color="#ffffff" />
-      <Label position={[-0.38, 0.235, 0.001]} text={`${co.name} · Jupiter · Solana · ${pending.status.replace("_", " ")}`} size={0.022} color="#b8c7da" />
-      <Row y={0.16} label={pending.side === "buy" ? "Spend" : "Sell"} value={`${q.inAmountUi} ${q.inSymbol}`} />
-      <Row y={0.11} label={`Estimated ${q.outSymbol}`} value={q.outAmountUi.toFixed(4)} />
+      <Card w={0.84} h={receipt ? 0.62 : 0.6} accent={accent} />
+      <Label position={[-0.38, 0.25, 0.001]} text={`${pending.side.toUpperCase()} ${co.tokenSymbol}`} size={0.042} color="#ffffff" />
+      <Label position={[-0.38, 0.205, 0.001]} text={`${co.name} · Jupiter · Solana · ${pending.status.replace("_", " ")}`} size={0.022} color="#b8c7da" />
+      <Row y={0.14} label={pending.side === "buy" ? "Spend" : "Sell"} value={`${q.inAmountUi} ${q.inSymbol}`} />
+      <Row y={0.095} label={`Estimated ${q.outSymbol}`} value={q.outAmountUi.toFixed(4)} />
       {receipt ? (
         /* Receipt: what the app saw. Links can't open inside the headset, so the tx is shown as text. */
         <group>
-          <Label position={[-0.38, 0.045, 0.001]} text={pending.confirmMs != null ? `CONFIRMED IN ${fmtSeconds(pending.confirmMs).toUpperCase()}` : "CONFIRMED ON SOLANA"} size={0.036} color={C.solGreen} />
-          {fees ? <Label position={[-0.38, -0.005, 0.001]} text={fees} size={0.021} color="#dfe9f5" maxWidth={0.76} /> : null}
-          {pending.confirmedAt ? <Label position={[-0.38, -0.045, 0.001]} text={`${fmtEt(pending.confirmedAt)}${pending.sessionLabel ? ` · ${pending.sessionLabel}` : ""}`} size={0.021} color="#b8c7da" /> : null}
-          <Label position={[-0.38, -0.09, 0.001]} text={`Solscan tx ${shortSig(receipt, 12)}`} size={0.022} color={C.solGreen} />
+          <Label position={[-0.38, 0.03, 0.001]} text={pending.confirmMs != null ? `CONFIRMED IN ${fmtSeconds(pending.confirmMs).toUpperCase()}` : "CONFIRMED ON SOLANA"} size={0.036} color={C.solGreen} />
+          {fees ? <Label position={[-0.38, -0.02, 0.001]} text={fees} size={0.02} color="#dfe9f5" maxWidth={0.76} /> : null}
+          {pending.confirmedAt ? <Label position={[-0.38, -0.075, 0.001]} text={`${fmtEt(pending.confirmedAt)}${pending.sessionLabel ? ` · ${pending.sessionLabel}` : ""}`} size={0.02} color="#b8c7da" /> : null}
+          <Label position={[-0.38, -0.115, 0.001]} text={`Solscan tx ${shortSig(receipt, 12)}`} size={0.022} color={C.solGreen} />
         </group>
       ) : (
         <group>
-          <Row y={0.06} label="Route" value={q.route} />
-          <Row y={0.01} label="Price impact" value={`${q.priceImpactPct.toFixed(3)}%`} color={q.priceImpactPct > 1 ? C.amber : "#ffffff"} />
-          {fees ? <Row y={-0.04} label="Fees" value={fees} /> : null}
-          {pending.signature ? <Row y={-0.09} label="Signature" value={shortSig(pending.signature, 10)} color={C.solGreen} /> : null}
+          <Row y={0.05} label="Route" value={q.route} />
+          <Row y={0.005} label="Price impact" value={`${q.priceImpactPct.toFixed(3)}%`} color={q.priceImpactPct > 1 ? C.amber : "#ffffff"} />
+          {/* The fee line is a sentence: it wraps under its caption rather than fighting a right-aligned value. */}
+          {fees ? <Label position={[-0.38, -0.045, 0.001]} text="FEES" size={0.017} color={C.frost} /> : null}
+          {fees ? <Label position={[-0.38, -0.085, 0.001]} text={fees} size={0.02} color="#dfe9f5" maxWidth={0.76} /> : null}
+          {pending.signature ? <Row y={-0.14} label="Signature" value={shortSig(pending.signature, 10)} color={C.solGreen} /> : null}
         </group>
       )}
-      {sign.shown ? <Label position={[-0.38, -0.14, 0.001]} text={`${sign.text}. Press again to exit and approve on the page — this trade waits there.`} size={0.021} color={C.amber} maxWidth={0.76} />
-        : err || pending.error ? <Label position={[-0.38, -0.14, 0.001]} text={err ?? pending.error ?? ""} size={0.021} color={C.magenta} maxWidth={0.76} /> : null}
-      <Pill position={[-0.19, -0.24, 0.002]} w={0.24} label={pending.status === "confirmed" || pending.status === "failed" ? "Close" : "Cancel"} accent={C.frost} disabled={busy} onClick={() => setPending(null)} />
+      {sign.shown ? <Label position={[-0.38, -0.165, 0.001]} text={`${sign.text}. Press again to exit and approve on the page — this trade waits there.`} size={0.02} color={C.amber} maxWidth={0.76} />
+        : err || pending.error ? <Label position={[-0.38, -0.165, 0.001]} text={err ?? pending.error ?? ""} size={0.02} color={C.magenta} maxWidth={0.76} /> : null}
+      <Pill position={[-0.19, -0.235, 0.002]} w={0.24} label={pending.status === "confirmed" || pending.status === "failed" ? "Close" : "Cancel"} accent={C.frost} disabled={busy} onClick={() => setPending(null)} />
       {pending.status === "awaiting_confirmation" || pending.status === "failed" ? (
-        <Pill position={[0.19, -0.24, 0.002]} w={0.24} label={sign.shown ? "Exit to sign" : busy ? "Signing…" : "Confirm"} accent={C.solGreen} disabled={busy} onClick={() => {
+        <Pill position={[0.19, -0.235, 0.002]} w={0.24} label={sign.shown ? "Exit to sign" : busy ? "Signing…" : "Confirm"} accent={C.solGreen} disabled={busy} onClick={() => {
           setErr(null);
           if (sign.needed) { sign.handoff(`confirm the ${pending.side} of ${co.tokenSymbol}`); return; }
           setBusy(true);
@@ -463,14 +526,17 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
   const cs = overview?.countries.find((c) => c.code === code);
   const ids = (cs?.companies ?? []).filter((id) => (prices[id]?.tokenPriceUsd ?? 0) > 0).slice(0, 8);
   const news = useWorld((s) => s.news);
+  const newsPending = useWorld((s) => s.newsPending);
   const headlines = news && (news.target === cd.name || news.items.some((n) => n.countryCodes.includes(code))) ? news.items.slice(0, 3) : [];
-  const top = 0.05 + ids.length * 0.025 + headlines.length * 0.024;
+  const searching = !headlines.length && newsPending === cd.name;
+  const wireRows = headlines.length ? 0.05 + headlines.length * NEWS_ROW_GAP : searching ? 0.05 : 0;
+  const top = 0.05 + ids.length * 0.025 + wireRows * 0.5;
   const listEnd = top - 0.03 - ids.length * 0.052;
-  const pillY = listEnd - (headlines.length ? 0.09 + headlines.length * 0.042 : 0.03);
+  const pillY = listEnd - (wireRows ? 0.04 + wireRows : 0.03);
   const cardTop = top + 0.14, cardBottom = pillY - 0.06;
   return (
     <group>
-      <Card w={0.92} h={cardTop - cardBottom} y={(cardTop + cardBottom) / 2} accent={C.cyan} fill={0.5} />
+      <Frame w={0.94} h={cardTop - cardBottom} y={(cardTop + cardBottom) / 2} />
       <Label position={[-0.4, top + 0.09, 0]} text={cd.name.toUpperCase()} size={0.046} color="#ffffff" />
       <Label position={[-0.4, top + 0.04, 0]} text={`${cs?.assetCount ?? 0} tokenized assets · ${cs?.tradableCount ?? 0} live · say a company name or point at it`} size={0.022} color="#b8c7da" />
       {ids.map((id, i) => {
@@ -482,8 +548,8 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
           </RowButton>
         );
       })}
-      {headlines.length ? <Label position={[-0.4, listEnd - 0.01, 0]} text={`NEWS · ${cd.name.toUpperCase()}`} size={0.02} color={C.frost} /> : null}
-      {headlines.map((n, i) => <Label key={n.id} position={[-0.4, listEnd - 0.05 - i * 0.042, 0]} icon="bullet" text={clip(`${n.title} — ${n.source}`, 62)} size={0.021} color="#c7d7ea" maxWidth={0.8} />)}
+      {headlines.length || searching ? <WireHead x={-0.4} y={listEnd - 0.012} label={cd.name} count={headlines.length} searching={searching} /> : null}
+      {headlines.map((n, i) => <NewsRow key={n.id} n={n} y={listEnd - 0.05 - NEWS_ROW_H / 2 - i * NEWS_ROW_GAP} w={0.8} />)}
       <Pill position={[0, pillY, 0.01]} w={0.22} icon="back" label="World" accent={C.frost} onClick={() => useWorld.getState().resetGlobe(false)} />
     </group>
   );
@@ -588,19 +654,13 @@ function Captions() {
     : state === "speaking" ? "SPEAKING · HOLD  A  TO INTERRUPT"
     : state === "thinking" ? "THINKING…"
     : "HOLD  A  TO SPEAK";
-  /* Backing chip sized from the laid-out text block, so it hugs one line or five. */
-  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
-  const onSync = (m: { textRenderInfo?: { blockBounds: number[] } }) => { const b = m.textRenderInfo?.blockBounds; if (b) setBox({ w: b[2] - b[0], h: b[3] - b[1] }); };
   return (
     <group ref={ref}>
       {/* Status line hugs the globe; captions stack upward from it (bottom-anchored so wrapping grows up). */}
       {last.length ? (
-        <group>
-          {box ? <GlassRect position={[0, 0.03 + box.h / 2, -0.003]} w={box.w + 0.08} h={box.h + 0.05} r={0.024} top="#0d1224" bottom="#080b16" accent={C.cyan} fill={0.55} rim={0.45} stroke={0.002} topBar={0} glow={0.2} pad={0.03} sheen={0} bar={0} /> : null}
-          <Text font={FONT_BODY} position={[0, 0.03, 0]} fontSize={0.025} color="#e8f4ff" anchorX="center" anchorY="bottom" maxWidth={1.0} textAlign="center" lineHeight={1.35} onSync={onSync} {...OUTLINE}>
-            {last.map((c) => `${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-160)}`).join("\n")}
-          </Text>
-        </group>
+        <Text font={FONT_BODY} position={[0, 0.03, 0]} fontSize={0.026} color="#e8f4ff" anchorX="center" anchorY="bottom" maxWidth={1.1} textAlign="center" lineHeight={1.35} {...OUTLINE}>
+          {last.map((c) => `${c.role === "user" ? "You: " : "Rhea: "}${c.text.slice(-200)}`).join("\n")}
+        </Text>
       ) : null}
       <Text font={FONT_BOLD} position={[0, 0, 0]} fontSize={0.02} color={holding ? C.violet : state === "speaking" ? C.solGreen : state === "thinking" ? C.amber : "#b8c7da"} anchorX="center" anchorY="middle" letterSpacing={0.2} {...OUTLINE}>
         {status}
@@ -718,7 +778,7 @@ function IdleHint() {
   const pill = session ? sessionPill(session) : null;
   return (
     <group>
-      <Card w={0.96} h={0.28} y={-0.02} accent={C.sol} fill={0.45} />
+      <Frame w={1.0} h={0.3} y={-0.02} accent={C.sol} />
       <Label position={[0, 0.06, 0]} text="RHEA" size={0.05} color="#ffffff" anchorX="center" />
       <Label position={[0, 0.005, 0]} text={overview ? `${overview.assets.length} tokenized stocks · ${overview.countries.length} countries · live on Solana` : "loading market…"} size={0.022} color="#b8c7da" anchorX="center" />
       {pill ? <Label position={[0, -0.095, 0]} text={pill.long} size={0.021} color={pill.open ? C.solGreen : C.gold} anchorX="center" /> : null}

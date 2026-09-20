@@ -10,9 +10,9 @@ function hostOf(url: string) {
 }
 
 /** Source badge: the site's favicon, falling back to a gradient monogram. */
-function SourceBadge({ source, url }: { source: string; url: string }) {
+function SourceBadge({ source, url, sourceUrl }: { source: string; url: string; sourceUrl?: string }) {
   const [failed, setFailed] = useState(false);
-  const host = hostOf(url);
+  const host = hostOf(sourceUrl ?? url);
   if (!host || failed) return <span className="nw-badge mono-badge" aria-hidden>{(source || host || "?").slice(0, 1).toUpperCase()}</span>;
   return <img className="nw-badge" src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
@@ -25,8 +25,8 @@ function NewsCard({ n, hidden }: { n: NewsEvent; hidden?: boolean }) {
   return (
     <a className="nw-card" href={n.url} target="_blank" rel="noreferrer noopener" aria-hidden={hidden || undefined} tabIndex={hidden ? -1 : undefined}>
       <div className="nw-top">
-        <SourceBadge source={n.source} url={n.url} />
-        <span className="nw-source">{n.source || hostOf(n.url)}</span>
+        <SourceBadge source={n.source} url={n.url} sourceUrl={n.sourceUrl} />
+        <span className="nw-source">{n.source || hostOf(n.sourceUrl ?? n.url)}</span>
         {dated ? <span className="nw-age">{fmtAge(n.publishedAt)}</span> : null}
       </div>
       <div className="nw-title">{n.title}</div>
