@@ -282,8 +282,14 @@ function WireHead({ y, x, label, count, searching }: { y: number; x: number; lab
 function NewsTicker() {
   const news = useWorld((s) => s.news);
   const newsPending = useWorld((s) => s.newsPending);
-  const items = news?.items ?? [];
-  const label = news?.target ?? newsPending ?? "";
+  const focusedCompany = useWorld((s) => s.focusedCompany);
+  const focusedCountry = useWorld((s) => s.focusedCountry);
+  /* The crawl belongs to the panel above it: it carries that place's stories and
+   * nobody else's. Closing the panel takes the news down with it, and the
+   * previous company's headlines never run under a newly opened one. */
+  const label = focusedCompany ? COMPANY_BY_ID[focusedCompany]?.name ?? "" : focusedCountry ? COUNTRIES[focusedCountry].name : "";
+  const items = label && news?.target === label ? news.items : [];
+  const searching = Boolean(label) && newsPending === label;
   const root = useRef<THREE.Group>(null);
   const cards = useRef<(THREE.Group | null)[]>([]);
   const offset = useRef(0);
@@ -323,7 +329,7 @@ function NewsTicker() {
     }
   });
 
-  if (!items.length && !newsPending) return null;
+  if (!items.length && !searching) return null;
   return (
     <group ref={root}>
       <WireHead x={-TICKER_W / 2} y={0} label={label} count={items.length} searching={!items.length} />
