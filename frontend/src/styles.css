@@ -158,6 +158,11 @@ input.chip { clip-path: none; border: 1px solid var(--edge); border-radius: 2px;
 .pos { color: var(--sol-green); } .neg { color: var(--magenta); } .warn { color: var(--amber); }
 .muted { color: var(--muted); }
 .mono { font-family: var(--mono); }
+.copy-addr { display: inline-flex; align-items: center; gap: 5px; padding: 1px 5px; margin: -1px -2px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font-size: inherit; letter-spacing: inherit; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+.copy-addr:hover, .copy-addr:focus-visible { border-color: rgba(63,224,255,0.35); background: rgba(63,224,255,0.08); color: var(--frost); }
+.copy-addr svg { opacity: 0.65; flex: none; }
+.copy-addr:hover svg { opacity: 1; }
+.addr-full { font-size: 12px; word-break: break-all; margin: 6px 0 10px; color: #e8f4ff; cursor: pointer; }
 /* Badges. Outlined and empty, so the rim has to be the ring — a solid rim
    layer under a transparent fill would tint the badge instead of framing it. */
 .tag { --cut: 3px; --edge: rgba(143,232,255,0.35); position: relative; isolation: isolate; display: inline-block; padding: 2px 7px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; border: 0; color: var(--frost); clip-path: var(--cut-face); }

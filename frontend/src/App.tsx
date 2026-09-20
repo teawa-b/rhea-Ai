@@ -79,7 +79,8 @@ function IntentResumer() {
     return () => clearInterval(h);
   }, [depositPrompt, auth.authenticated]);
   useEffect(() => {
-    if (!depositPrompt || !portfolio || portfolio.usdcBalance < depositPrompt.neededUsd) return;
+    /* neededUsd <= 0 is the plain "show me my address" prompt: nothing to wait for. */
+    if (!depositPrompt || depositPrompt.neededUsd <= 0 || !portfolio || portfolio.usdcBalance < depositPrompt.neededUsd) return;
     const { resume } = depositPrompt;
     useMarket.getState().setDepositPrompt(null);
     const v = useVoice.getState();
