@@ -51,7 +51,7 @@ function SessionPill() {
   if (!session) return null;
   const pill = sessionPill(session, now);
   return (
-    <span className="chip" role="status" title="xStocks trade 24/5 on Solana through Jupiter; the US regular session is 09:30–16:00 ET" style={{ alignSelf: "flex-start", maxWidth: "100%", padding: "5px 11px", borderRadius: 999, fontSize: 11, gap: 7, borderColor: pill.open ? "rgba(20,241,149,0.4)" : "rgba(255,178,32,0.4)" }}>
+    <span className={`chip pill ${pill.open ? "green" : "amber"}`} role="status" title="xStocks trade 24/5 on Solana through Jupiter; the US regular session is 09:30–16:00 ET" style={{ alignSelf: "flex-start", maxWidth: "100%" }}>
       <i className={`dot ${pill.open ? "on" : "warn"}`} style={{ width: 7, height: 7 }} />
       <span className="long">{pill.long}</span>
       <span className="short">{pill.short}</span>
@@ -66,7 +66,7 @@ function VerifiedOnMainnet() {
   if (!VERIFIED_ON_MAINNET.length) return null;
   return (
     <div className="clickable" style={{ alignSelf: "flex-start", maxWidth: "100%" }}>
-      <button type="button" className="chip" aria-expanded={open} onClick={() => setOpen(!open)} style={{ cursor: "pointer", padding: "5px 11px", borderRadius: 999, fontSize: 11, gap: 7, borderColor: "rgba(20,241,149,0.4)" }}>
+      <button type="button" className="chip pill green" aria-expanded={open} onClick={() => setOpen(!open)} style={{ cursor: "pointer" }}>
         <i className="dot on" style={{ width: 7, height: 7 }} />Verified on mainnet ({VERIFIED_ON_MAINNET.length}) ↗
       </button>
       {open ? (
@@ -293,7 +293,7 @@ export function Hud() {
           ) : (
             <>
               {demoMode ? (
-                <button className="chip clickable" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings("user"))} title={`Public demo wallet ${DEMO_WALLET?.slice(0, 4)}…${DEMO_WALLET?.slice(-4)}. Read-only: sign in to trade your own wallet.`} style={{ borderColor: "rgba(255,178,32,0.5)" }}>
+                <button className="chip clickable amber" onClick={() => (showPortfolio ? resetGlobe(false) : showHoldings("user"))} title={`Public demo wallet ${DEMO_WALLET?.slice(0, 4)}…${DEMO_WALLET?.slice(-4)}. Read-only: sign in to trade your own wallet.`} >
                   <i className="dot warn" />Demo portfolio · read-only{portfolio ? ` · ${fmtUsd(portfolio.totalValueUsd)}` : ""}
                 </button>
               ) : null}
@@ -316,12 +316,12 @@ export function Hud() {
             <nav className="crumbs clickable" aria-label="Where you are">
               <button className="crumb-back" onClick={goBack} title="Back" aria-label="Back"><ChevronLeftIcon size={16} /></button>
               <button className="crumb" onClick={() => resetGlobe(false)}><GlobeIcon size={14} />World</button>
-              {focusedRegion ? (<><span className="crumb-sep" aria-hidden>›</span><span className="crumb current" aria-current="page">{REGION_BY_ID[focusedRegion]?.name}</span></>) : null}
+              {focusedRegion ? (<><span className="crumb-sep mid" aria-hidden>›</span><span className={`crumb ${focusedCountry ? "mid" : "current"}`} aria-current={focusedCountry ? undefined : "page"}>{REGION_BY_ID[focusedRegion]?.name}</span></>) : null}
               {focusedCountry ? (
                 <>
-                  <span className="crumb-sep" aria-hidden>›</span>
+                  <span className={`crumb-sep${focusedCompany ? " mid" : ""}`} aria-hidden>›</span>
                   {focusedCompany
-                    ? <button className="crumb" onClick={() => focusCountry(focusedCountry, "user")}>{COUNTRIES[focusedCountry].name}</button>
+                    ? <button className="crumb mid" onClick={() => focusCountry(focusedCountry, "user")}>{COUNTRIES[focusedCountry].name}</button>
                     : <span className="crumb current" aria-current="page">{COUNTRIES[focusedCountry].name}</span>}
                 </>
               ) : null}
@@ -347,9 +347,9 @@ export function Hud() {
           </div>
           {!captions.length ? (
             <div className="row clickable" style={{ gap: 6, flexWrap: "wrap" }}>
-              {showDemoChip ? <button type="button" className="chip" onClick={hearDemo} title="A public wallet's real portfolio, read-only, no sign-in" style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 11.5, whiteSpace: "normal", textAlign: "left", borderColor: "rgba(20,241,149,0.45)" }}>▶ Hear the demo portfolio briefing</button> : null}
+              {showDemoChip ? <button type="button" className="chip pill green" onClick={hearDemo} title="A public wallet's real portfolio, read-only, no sign-in" style={{ cursor: "pointer", whiteSpace: "normal", textAlign: "left" }}>▶ Hear the demo portfolio briefing</button> : null}
               {SUGGESTIONS.map((q) => (
-                <button key={q} type="button" className="chip" onClick={() => sendText(q, auth)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 11.5, whiteSpace: "normal", textAlign: "left" }}>{q}</button>
+                <button key={q} type="button" className="chip pill" onClick={() => sendText(q, auth)} style={{ cursor: "pointer", whiteSpace: "normal", textAlign: "left" }}>{q}</button>
               ))}
             </div>
           ) : null}

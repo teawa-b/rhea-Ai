@@ -21,6 +21,10 @@
   --font: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --mono: 'JetBrains Mono', Consolas, Menlo, monospace;
   --glow: 0 0 14px rgba(63, 224, 255, 0.28);
+  /* Corner cut on every button and chip. 0 = square, 6px = chamfer,
+     10px+ = a notch. One number changes the whole app. The geometry that
+     draws it lives with --cut-face / --cut-ring further down. */
+  --btn-cut: 6px;
 }
 
 * { box-sizing: border-box; }
@@ -44,40 +48,100 @@ a { color: var(--frost); }
 .topbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* ---------- chips / buttons ---------- */
-.chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 2px; background: var(--panel); border: 1px solid rgba(63,224,255,0.28); color: var(--text); font-size: 12px; letter-spacing: 0.06em; backdrop-filter: blur(10px); box-shadow: inset 0 0 0 1px rgba(63,224,255,0.08); white-space: nowrap; }
+
+/* The two paths every control is cut with. They read --cut off the element
+   using them, so each control picks its own size and inherits the geometry —
+   which is also why they are declared here and not on :root. A var() inside
+   a custom property is substituted against the element the property is
+   DECLARED on, so --cut-face on :root would resolve --cut to nothing and
+   throw the whole clip-path away. */
+.btn, .chip, .tag, .crumbs, .crumb.details {
+  --cut-face: polygon(
+    var(--cut) 0, calc(100% - var(--cut)) 0,
+    100% var(--cut), 100% calc(100% - var(--cut)),
+    calc(100% - var(--cut)) 100%, var(--cut) 100%,
+    0 calc(100% - var(--cut)), 0 var(--cut));
+  --cut-ring: polygon(evenodd,
+    var(--cut) 0, calc(100% - var(--cut)) 0,
+    100% var(--cut), 100% calc(100% - var(--cut)),
+    calc(100% - var(--cut)) 100%, var(--cut) 100%,
+    0 calc(100% - var(--cut)), 0 var(--cut),
+    calc(var(--cut) + 0.41px) 1px, calc(100% - var(--cut) - 0.41px) 1px,
+    calc(100% - 1px) calc(var(--cut) + 0.41px), calc(100% - 1px) calc(100% - var(--cut) - 0.41px),
+    calc(100% - var(--cut) - 0.41px) calc(100% - 1px), calc(var(--cut) + 0.41px) calc(100% - 1px),
+    1px calc(100% - var(--cut) - 0.41px), 1px calc(var(--cut) + 0.41px));
+}
+
+/* Chips: readouts, filters and toggles. Same corner cut as the buttons, so a
+   top bar of chips beside a Sign in button reads as one family rather than
+   two. Text fields are the deliberate exception — an <input> cannot carry a
+   pseudo-element to hang the rim on, and a field that still looks like a
+   field is the right answer anyway. */
+.chip {
+  --cut: 5px;
+  --edge: rgba(63,224,255,0.28);
+  position: relative; isolation: isolate;
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--panel); border: 0; color: var(--text);
+  font-size: 12px; letter-spacing: 0.06em; backdrop-filter: blur(10px);
+  white-space: nowrap; clip-path: var(--cut-face);
+}
+.chip::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--edge); clip-path: var(--cut-ring); }
 .chip.dim { opacity: 0.7; }
+/* Smaller, lighter chip for status readouts and suggestion prompts. Same cut,
+   tighter, so a row of them under the globe stays quiet. */
+.chip.pill { --cut: 4px; padding: 5px 11px; font-size: 11px; gap: 7px; }
+.chip.green { --edge: rgba(20,241,149,0.42); }
+.chip.amber { --edge: rgba(255,178,32,0.48); }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 8px currentColor; }
 .chip .dot.on { background: var(--green); color: var(--green); }
 .chip .dot.warn { background: var(--amber); color: var(--amber); }
 .chip .dot.err { background: var(--red); color: var(--red); }
 .chip .dot.live { background: var(--cyan); color: var(--cyan); animation: pulse 1.4s infinite; }
-.chip.sol { border-color: rgba(153,69,255,0.55); background: linear-gradient(90deg, rgba(153,69,255,0.18), rgba(20,241,149,0.08)); box-shadow: 0 0 14px rgba(153,69,255,0.25); }
+/* clip-path eats an outer box-shadow, so the brand glow is a drop-shadow —
+   it follows the cut instead of ringing a rectangle that is not there. */
+.chip.sol { --edge: rgba(153,69,255,0.55); background: linear-gradient(90deg, rgba(153,69,255,0.18), rgba(20,241,149,0.08)); filter: drop-shadow(0 0 8px rgba(153,69,255,0.28)); }
+input.chip { clip-path: none; border: 1px solid var(--edge); border-radius: 2px; background: var(--panel); appearance: none; -webkit-appearance: none; }
+
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.5); opacity: .55 } }
 
-/* Buttons. Each action keeps its own colour — cyan base, Solana ramp on the
-   primary, magenta destructive, amber conditional. Shape is angular rather
-   than a capsule: a hard edge with a 2px break, sized tighter than before. */
+/* Buttons. Colour carries the action — cyan for a neutral one, the Solana
+   ramp on the primary, magenta to sell, amber for a conditional order. Shape
+   is the shared chamfer; see --cut-face / --cut-ring above for why the rim is
+   a ring rather than a border. A negative z-index puts that ring above the
+   element's background (the fill) and below the label, which is the paint
+   order CSS gives a stacking context. */
 .btn {
-  cursor: pointer; border: 1px solid rgba(63,224,255,0.45);
-  background: linear-gradient(180deg, rgba(63,224,255,0.16), rgba(63,224,255,0.06));
-  color: #fff; padding: 8px 13px; border-radius: 2px;
+  --cut: var(--btn-cut);
+  --edge: rgba(63,224,255,0.45);
+  --fill: linear-gradient(180deg, rgba(63,224,255,0.16), rgba(63,224,255,0.06));
+  position: relative; isolation: isolate;
+  cursor: pointer; border: 0; background: var(--fill); clip-path: var(--cut-face);
+  color: #fff; padding: 9px 14px;
   font-size: 11.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-  transition: transform .1s, box-shadow .15s, background .15s; box-shadow: var(--glow);
+  transition: transform .1s, filter .15s, background .15s;
 }
-.btn:hover { background: linear-gradient(180deg, rgba(63,224,255,0.28), rgba(63,224,255,0.1)); }
+.btn::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--edge); clip-path: var(--cut-ring); }
+/* One hover for every variant: brighten what is already there, rather than
+   restating each gradient and losing the variant's colour to source order. */
+.btn:hover { filter: brightness(1.18); }
 .btn:active { transform: scale(0.97); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
-.btn.primary { border-color: var(--cyan); background: linear-gradient(180deg, rgba(63,224,255,0.42), rgba(10,126,164,0.4)); }
-.btn.sol { border-color: transparent; background: linear-gradient(90deg, var(--sol), #6d3df0 55%, var(--sol-green)); color: #fff; box-shadow: 0 0 18px rgba(153,69,255,0.45); text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
-.btn.sol:hover { filter: brightness(1.12); }
-.btn.ghost { background: transparent; box-shadow: none; border-color: rgba(143,232,255,0.25); color: var(--frost); }
-.btn.danger { border-color: rgba(255,46,136,0.6); background: linear-gradient(180deg, rgba(255,46,136,0.25), rgba(255,46,136,0.08)); box-shadow: 0 0 14px rgba(255,46,136,0.2); color: #fff; }
-.btn.amber { border-color: rgba(255,178,32,0.7); background: linear-gradient(180deg, rgba(255,178,32,0.3), rgba(255,178,32,0.08)); box-shadow: 0 0 14px rgba(255,178,32,0.25); color: #fff; }
-.btn.sm { padding: 6px 11px; font-size: 11px; }
-.btn.icon { padding: 8px; border-radius: 2px; display: inline-grid; place-items: center; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
-select.chip, input.chip { appearance: none; -webkit-appearance: none; cursor: pointer; }
-select.chip option { background: var(--panel-solid); }
+.btn.primary { --edge: var(--cyan); --fill: linear-gradient(180deg, rgba(63,224,255,0.42), rgba(10,126,164,0.4)); }
+.btn.sol {
+  --edge: rgba(255,255,255,0.34);
+  --fill: linear-gradient(90deg, var(--sol), #6d3df0 55%, var(--sol-green));
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  filter: drop-shadow(0 0 9px rgba(153,69,255,0.4));
+}
+.btn.sol:hover { filter: drop-shadow(0 0 13px rgba(153,69,255,0.55)) brightness(1.1); }
+.btn.ghost { --edge: rgba(143,232,255,0.3); --fill: transparent; color: var(--frost); }
+.btn.ghost:hover { --fill: rgba(143,232,255,0.1); }
+.btn.danger { --edge: rgba(255,46,136,0.62); --fill: linear-gradient(180deg, rgba(255,46,136,0.25), rgba(255,46,136,0.08)); }
+.btn.amber { --edge: rgba(255,178,32,0.7); --fill: linear-gradient(180deg, rgba(255,178,32,0.3), rgba(255,178,32,0.08)); }
+.btn.sm { padding: 6px 11px; font-size: 11px; --cut: 5px; }
+.btn.icon { padding: 8px; --cut: 5px; display: inline-grid; place-items: center; }
 
 /* ---------- panels ---------- */
 .panel { background: var(--panel); border: 1px solid rgba(63,224,255,0.28); border-radius: 12px; backdrop-filter: blur(14px); box-shadow: var(--glow), 0 14px 40px rgba(0,0,0,0.5); position: relative; overflow: hidden; }
@@ -94,10 +158,13 @@ select.chip option { background: var(--panel-solid); }
 .pos { color: var(--sol-green); } .neg { color: var(--magenta); } .warn { color: var(--amber); }
 .muted { color: var(--muted); }
 .mono { font-family: var(--mono); }
-.tag { display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; border: 1px solid rgba(143,232,255,0.35); color: var(--frost); }
-.tag.amber { border-color: rgba(255,178,32,0.6); color: var(--gold); }
-.tag.green { border-color: rgba(74,222,128,0.5); color: var(--green); }
-.tag.magenta { border-color: rgba(255,46,136,0.6); color: #ff8ab8; }
+/* Badges. Outlined and empty, so the rim has to be the ring — a solid rim
+   layer under a transparent fill would tint the badge instead of framing it. */
+.tag { --cut: 3px; --edge: rgba(143,232,255,0.35); position: relative; isolation: isolate; display: inline-block; padding: 2px 7px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; border: 0; color: var(--frost); clip-path: var(--cut-face); }
+.tag::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--edge); clip-path: var(--cut-ring); }
+.tag.amber { --edge: rgba(255,178,32,0.6); color: var(--gold); }
+.tag.green { --edge: rgba(74,222,128,0.5); color: var(--green); }
+.tag.magenta { --edge: rgba(255,46,136,0.6); color: #ff8ab8; }
 .tag.dim { opacity: 0.6; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .spacer { flex: 1; }
@@ -125,7 +192,11 @@ select.chip option { background: var(--panel-solid); }
 @keyframes section-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 /* Location trail + back */
-.crumbs { align-self: flex-start; display: inline-flex; align-items: center; gap: 2px; padding: 4px 10px 4px 4px; border-radius: 999px; background: var(--panel); border: 1px solid rgba(63,224,255,0.22); backdrop-filter: blur(12px); box-shadow: 0 6px 22px rgba(0,0,0,0.35); max-width: 100%; animation: section-in .4s ease-out both; }
+/* The trail bar. Chamfered like everything else, which leaves the two round
+   icon buttons (back, close) as the only circles in the app — a shape that
+   now means "one tap, no label" rather than being one more radius. */
+.crumbs { --cut: 8px; --edge: rgba(63,224,255,0.22); position: relative; isolation: isolate; align-self: flex-start; display: inline-flex; align-items: center; gap: 2px; padding: 4px 10px 4px 4px; background: var(--panel); border: 0; backdrop-filter: blur(12px); filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45)); max-width: 100%; clip-path: var(--cut-face); animation: section-in .4s ease-out both; }
+.crumbs::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--edge); clip-path: var(--cut-ring); }
 .crumb-back { display: grid; place-items: center; width: 30px; height: 30px; margin-right: 4px; border-radius: 50%; cursor: pointer; color: #fff; border: 1px solid rgba(63,224,255,0.45); background: linear-gradient(180deg, rgba(63,224,255,0.22), rgba(63,224,255,0.06)); box-shadow: var(--glow); transition: transform .12s, background .15s; }
 .crumb-back:hover { background: linear-gradient(180deg, rgba(63,224,255,0.36), rgba(63,224,255,0.12)); transform: translateX(-1px); }
 .crumb-back:active { transform: scale(0.94); }
@@ -237,8 +308,8 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
 .hero-line { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 14px 0 0; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .toast { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); z-index: 30; pointer-events: auto; max-width: calc(100vw - 24px); }
-.toast .chip { border-color: rgba(255,90,110,0.6); white-space: normal; line-height: 1.4; }
-.toast .chip.notice { border-color: rgba(255,178,32,0.6); }
+.toast .chip { --edge: rgba(255,90,110,0.6); white-space: normal; line-height: 1.4; }
+.toast .chip.notice { --edge: rgba(255,178,32,0.6); }
 
 /* ---------- XR launcher (dead center) + mic pre-flight ---------- */
 .hud > .xr-launch { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 25; pointer-events: none; }
@@ -329,7 +400,8 @@ button.crumb:hover { color: #fff; background: rgba(63,224,255,0.1); }
  * Rhea moving the globe leaves the sheet collapsed: the crumb trail grows a
  * "Details" tag (or a same-sized pill when there is no trail) and the globe
  * keeps the screen. Tapping it, or a marker, opens the panel. */
-.crumb.details { margin-left: 4px; padding: 4px 9px; border-radius: 999px; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: rgba(63,224,255,0.16); border: 1px solid rgba(63,224,255,0.4); }
+.crumb.details { --cut: 4px; --edge: rgba(63,224,255,0.4); position: relative; isolation: isolate; margin-left: 4px; padding: 4px 9px; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: rgba(63,224,255,0.16); border: 0; clip-path: var(--cut-face); }
+.crumb.details::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--edge); clip-path: var(--cut-ring); }
 button.crumb.details:hover { background: rgba(63,224,255,0.28); }
 .crumbs.peek { cursor: pointer; padding-left: 12px; }
 .peek-grip { flex: none; width: 34px; height: 4px; border-radius: 999px; background: rgba(63,224,255,0.45); }
@@ -349,7 +421,7 @@ button.crumb.details:hover { background: rgba(63,224,255,0.28); }
   .topbar { flex-wrap: wrap; padding: 10px 12px 4px; gap: 8px 6px; }
   .topbar-right { display: contents; }
   .topbar-right > .chip.sol { margin-left: auto; }
-  .topbar-right > select.chip, .topbar-right > .btn { flex: 1 1 auto; justify-content: center; }
+  .topbar-right > .btn { flex: 1 1 auto; justify-content: center; }
   .brand { gap: 8px; }
   .brand small { display: none; }
   .brand-mark { width: 30px; height: 30px; }
@@ -361,6 +433,11 @@ button.crumb.details:hover { background: rgba(63,224,255,0.28); }
   /* Leave a strip of globe above the sheet even when it is open. */
   .stage .right { max-height: min(58vh, calc(100% - 148px)); }
   .crumbs { padding-right: 8px; }
+  /* The trail keeps its two ends: World, to get all the way out, and the
+     company you are actually looking at. On a 390px screen the middle levels
+     were spending 100px to truncate the company name to "NVID…", and the
+     back arrow already walks up one level at a time. */
+  .crumbs .mid { display: none; }
   .crumb { font-size: 11.5px; padding: 5px 5px; }
   .captions .caption { font-size: 13px; padding: 8px 11px; }
   .bottombar { align-items: center; gap: 8px; padding: 6px 12px 12px; }
