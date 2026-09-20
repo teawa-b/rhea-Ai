@@ -25,6 +25,7 @@ import { useHandheld } from "./handheld";
 import { FONT_BODY, FONT_BOLD, FONT_NUM, latinText } from "./fonts";
 import { GlassRect, UNIT_PLANE, type GlassMaterial } from "./glass";
 import { HoloFrame } from "./holoframe";
+import { HoloKeyboard, HoloNumpad, TypedLine } from "./HoloKeyboard";
 import { useLogoTexture } from "./logoTexture";
 import { api } from "@/market/api";
 import type { NewsEvent } from "@shared/types";
@@ -556,32 +557,138 @@ function CountryHolo({ code }: { code: keyof typeof COUNTRIES }) {
 }
 
 /* ---------------- Sign-in / funding gates (in-headset) ----------------
- * Privy's login is a DOM modal, which an immersive session hides, so the
- * sign-in card ends the session first: the user signs in on the flat page and
- * re-enters Mixed Reality signed in (the login persists in the browser). */
+ * Privy's login is a DOM modal, which an immersive session hides. Rather than
+ * ejecting the user to the flat page, the card runs Privy's headless email
+ * one-time-code flow on holo keyboards: address, then the six digits. A
+ * returning browser remembers the address, so it is usually one press and a
+ * code. Google and external wallets still need a browser and say so.
+ *
+ * Nothing resumes the pending trade here: App already watches for
+ * authenticated + loginPrompt and calls resumeIntent, however the user got in. */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+/** t***e@gmail.com - enough to recognise, not enough to read over a shoulder. */
+const maskEmail = (a: string) => {
+  const [u, d] = a.split("@");
+  if (!d) return a;
+  const dots = "•".repeat(Math.max(1, Math.min(3, u.length - 2)));
+  return `${u.slice(0, 1)}${dots}${u.length > 1 ? u.slice(-1) : ""}@${d}`;
+};
 
 function LoginHolo() {
   const auth = useAuth();
   const session = useXR((s) => s.session);
   const prompt = useMarket((s) => s.loginPrompt);
   const setPrompt = useMarket((s) => s.setLoginPrompt);
+  const remembered = auth.email.remembered;
+  /* "choose" only when there is nothing remembered: a returning user lands straight on Send. */
+  const [step, setStep] = useState<"choose" | "email" | "code">(remembered ? "email" : "choose");
+  const [addr, setAddr] = useState(remembered ?? "");
+  const [code, setCode] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const valid = EMAIL_RE.test(addr.trim());
+
   if (!prompt) return null;
+
+  const send = () => {
+    if (!valid || busy) return;
+    setBusy(true); setErr(null);
+    void auth.email.sendCode(addr.trim())
+      .then(() => { setCode(""); setStep("code"); })
+      .catch((e: Error) => setErr(e.message || "Could not send the code - check the address."))
+      .finally(() => setBusy(false));
+  };
+  const submit = () => {
+    if (code.length !== 6 || busy) return;
+    setBusy(true); setErr(null);
+    /* On success App's resume effect takes over and the panel unmounts with the prompt. */
+    void auth.email.submitCode(code)
+      .catch((e: Error) => { setErr(e.message || "That code was not right - try again."); setCode(""); })
+      .finally(() => setBusy(false));
+  };
+
+  const header = (title: string, sub: string) => (
+    <group>
+      <Label position={[-0.44, 0.44, 0.001]} text={title} size={0.038} color="#ffffff" />
+      <Label position={[-0.44, 0.395, 0.001]} text={sub} size={0.021} color="#b8c7da" maxWidth={0.88} />
+    </group>
+  );
+  const note = (text: string, color: string = C.magenta) => <Label position={[0, 0.3, 0.001]} text={text} size={0.02} color={color} maxWidth={0.88} anchorX="center" />;
+
+  if (step === "choose") {
+    return (
+      <group>
+        <Card w={0.96} h={0.62} accent={C.cyan} />
+        {header("SIGN IN TO TRADE", prompt.reason)}
+        <Label position={[-0.44, 0.31, 0.001]} text={`New accounts get an embedded Solana wallet in seconds.${prompt.resume ? ` Your request to ${describeIntent(prompt.resume)} continues automatically.` : ""}`} size={0.021} color="#dfe9f5" maxWidth={0.88} />
+        <Label position={[-0.44, 0.21, 0.001]} text="EMAIL - STAY IN MIXED REALITY" size={0.023} color={C.solGreen} />
+        <Label position={[-0.44, 0.165, 0.001]} text="Type your address here, we mail you a six-digit code, you type that here. You never take the headset off." size={0.021} color="#b8c7da" maxWidth={0.88} />
+        <Pill position={[0, 0.075, 0.002]} w={0.34} label="Use email" accent={C.solGreen} onClick={() => { setErr(null); setStep("email"); }} />
+        <Label position={[-0.44, -0.02, 0.001]} text="GOOGLE OR A SOLANA WALLET" size={0.023} color={C.frost} />
+        <Label position={[-0.44, -0.065, 0.001]} text="These need a browser, so they open a tab and end Mixed Reality. Sign in there, then press Enter Mixed Reality again." size={0.021} color="#b8c7da" maxWidth={0.88} />
+        <Pill position={[-0.17, -0.16, 0.002]} w={0.26} label="Later" accent={C.frost} onClick={() => setPrompt(null)} />
+        <Pill position={[0.17, -0.16, 0.002]} w={0.3} icon="external" label="Open a tab" accent={C.cyan} onClick={() => {
+          /* Try the tab straight from the press; if the browser blocks it outside a DOM gesture,
+           * the flat page's sign-in panel (shown once the session ends) has a button that opens it. */
+          const tab = auth.mode === "privy" ? window.open(signInUrl(), "rhea-signin") : null;
+          void session?.end().catch(() => undefined);
+          if (tab) tab.focus?.();
+        }} />
+      </group>
+    );
+  }
+
+  if (step === "email") {
+    return (
+      <group>
+        <Card w={0.96} h={0.98} accent={C.cyan} />
+        {header("YOUR EMAIL", busy ? "Sending your code..." : "We mail a six-digit code. Nothing leaves the headset.")}
+        {err ? note(err) : !valid && addr ? note("That does not look like an email address yet.", C.amber) : null}
+        <TypedLine y={0.24} w={0.88} text={addr} placeholder="you@example.com" />
+        <HoloKeyboard
+          y={0.15}
+          onKey={(ch) => { setErr(null); setAddr((v) => (v + ch).slice(0, 64)); }}
+          onBackspace={() => setAddr((v) => v.slice(0, -1))}
+          onDone={send}
+          doneLabel={busy ? "..." : "Send"}
+          doneEnabled={valid && !busy}
+        />
+        <Pill position={[-0.17, -0.42, 0.002]} w={0.26} label="Later" accent={C.frost} disabled={busy} onClick={() => setPrompt(null)} />
+        <Pill position={[0.17, -0.42, 0.002]} w={0.3} label={remembered && addr === remembered ? "Other options" : "Back"} accent={C.frost} disabled={busy}
+          onClick={() => { setErr(null); setStep("choose"); }} />
+      </group>
+    );
+  }
+
   return (
     <group>
-      <Card w={0.84} h={0.5} accent={C.cyan} />
-      <Label position={[-0.38, 0.19, 0.001]} text="SIGN IN TO TRADE" size={0.04} color="#ffffff" />
-      <Label position={[-0.38, 0.145, 0.001]} text={prompt.reason} size={0.022} color="#b8c7da" maxWidth={0.76} />
-      <Label position={[-0.38, 0.07, 0.001]} text="Google, email or a Solana wallet — new accounts get an embedded Solana wallet in seconds." size={0.022} color="#dfe9f5" maxWidth={0.76} />
-      <Label position={[-0.38, -0.01, 0.001]} text={`Sign in opens a new browser tab: sign in there, come back to this tab, then press Enter Mixed Reality again.${prompt.resume ? ` Your request to ${describeIntent(prompt.resume)} continues automatically.` : ""}`} size={0.021} color="#b8c7da" maxWidth={0.76} />
-      <Pill position={[-0.19, -0.17, 0.002]} w={0.24} label="Later" accent={C.frost} onClick={() => setPrompt(null)} />
-      <Pill position={[0.19, -0.17, 0.002]} w={0.24} icon="external" label="Sign in" accent={C.cyan} onClick={() => {
-        /* Try the tab straight from the press; if the browser blocks it outside
-         * a DOM gesture, the flat page's sign-in panel (shown once the session
-         * ends) has a button that opens it. */
-        const tab = auth.mode === "privy" ? window.open(signInUrl(), "rhea-signin") : null;
-        void session?.end().catch(() => undefined);
-        if (tab) tab.focus?.();
-      }} />
+      <Card w={0.96} h={0.92} accent={C.solGreen} />
+      {header("ENTER YOUR CODE", `Six digits, sent to ${maskEmail(addr.trim())}. It may take a few seconds.`)}
+      {err ? note(err) : busy ? note("Checking...", C.amber) : null}
+      {/* Six slots, so a mistyped digit is obvious without leaving the pad. */}
+      <group position={[0, 0.235, 0.002]}>
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <group key={i} position={[(i - 2.5) * 0.072, 0, 0]}>
+            <GlassRect w={0.062} h={0.072} r={0.012} top="#0d1224" bottom="#080b16"
+              accent={i < code.length ? C.solGreen : C.frost} fill={0.6} rim={i < code.length ? 0.9 : 0.4}
+              stroke={0.0022} bar={0} topBar={0} sheen={0} />
+            <Text font={FONT_NUM} position={[0, -0.001, 0.002]} fontSize={0.032} color="#ffffff"
+              anchorX="center" anchorY="middle" raycast={NO_RAYCAST} {...OUTLINE}>{code[i] ?? ""}</Text>
+          </group>
+        ))}
+      </group>
+      <HoloNumpad
+        y={0.14}
+        onKey={(d) => { setErr(null); setCode((v) => (v.length >= 6 ? v : v + d)); }}
+        onBackspace={() => setCode((v) => v.slice(0, -1))}
+        onDone={submit}
+        doneEnabled={code.length === 6 && !busy}
+      />
+      <Pill position={[-0.3, -0.38, 0.002]} w={0.24} label="Back" accent={C.frost} disabled={busy}
+        onClick={() => { setErr(null); setCode(""); setStep("email"); }} />
+      <Pill position={[0, -0.38, 0.002]} w={0.26} label="Resend" accent={C.cyan} disabled={busy} onClick={send} />
+      <Pill position={[0.3, -0.38, 0.002]} w={0.24} label="Later" accent={C.frost} disabled={busy} onClick={() => setPrompt(null)} />
     </group>
   );
 }

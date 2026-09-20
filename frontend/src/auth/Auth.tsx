@@ -6,7 +6,7 @@
  * can still explore. The private key never touches app code: signing goes
  * through Privy's signTransaction / signMessage.
  */
-import { PrivyProvider, usePrivy, useLogin, useLogout } from "@privy-io/react-auth";
+import { PrivyProvider, usePrivy, useLogin, useLoginWithEmail, useLogout } from "@privy-io/react-auth";
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { toSolanaWalletConnectors, useSignMessage, useSignTransaction, useWallets, type ConnectedStandardSolanaWallet } from "@privy-io/react-auth/solana";
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
@@ -25,6 +25,18 @@ export type RheaAuth = {
   logout: () => Promise<void>;
   signTransaction: (tx: Uint8Array) => Promise<Uint8Array>;
   signMessage: (msg: Uint8Array) => Promise<Uint8Array>;
+  /* Headless email one-time-code. Privy's own login is a DOM modal, which an immersive session
+   * hides; these run the same flow with no UI of its own, so the headset can sign in in place. */
+  email: {
+    /** Mails a six-digit code. */
+    sendCode: (address: string) => Promise<void>;
+    /** Exchanges the code for a session; rejects on a wrong code (5 tries, then the code dies). */
+    submitCode: (code: string) => Promise<void>;
+    /** "initial" | "sending-code" | "awaiting-code-input" | "submitting-code" | "done" | "error". */
+    status: string;
+    /** The address this browser last signed in with, so a returning user skips typing it. */
+    remembered: string | null;
+  };
 };
 
 const GUEST: RheaAuth = {
@@ -38,6 +50,12 @@ const GUEST: RheaAuth = {
   logout: async () => undefined,
   signTransaction: async () => { throw new Error("Sign in to trade"); },
   signMessage: async () => { throw new Error("Sign in to continue"); },
+  email: {
+    sendCode: async () => { throw new Error("Set VITE_PRIVY_APP_ID to enable sign-in."); },
+    submitCode: async () => { throw new Error("Set VITE_PRIVY_APP_ID to enable sign-in."); },
+    status: "initial",
+    remembered: null,
+  },
 };
 
 const AuthCtx = createContext<RheaAuth>(GUEST);
@@ -69,6 +87,13 @@ const SOLANA_RPCS = {
  * as a second look. External wallets keep their own popup, which XRPanels hands off for. */
 const walletUi = (embedded: boolean) => ({ showWalletUIs: !(embedded && xrStore.getState().mode != null) });
 
+/* The address (never a code or token) this browser last signed in with. Only a convenience:
+ * it lets the in-headset panel offer "send a code to t•••e@gmail.com" instead of making the
+ * user peck an email out on a holo keyboard every session. */
+const EMAIL_KEY = "rhea:last-email";
+const readEmail = () => { try { return localStorage.getItem(EMAIL_KEY); } catch { return null; } };
+const rememberEmail = (a: string) => { try { localStorage.setItem(EMAIL_KEY, a); } catch { /* storage blocked */ } };
+
 function PrivyBridge({ children }: { children: ReactNode }) {
   const { ready, authenticated, user } = usePrivy();
   const { login } = useLogin();
@@ -76,6 +101,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
   const { wallets, ready: walletsReady } = useWallets();
   const { signTransaction } = useSignTransaction();
   const { signMessage } = useSignMessage();
+  const { sendCode, loginWithCode, state: otp } = useLoginWithEmail();
   const setWallet = useMarket((s) => s.setWallet);
 
   /* Prefer the Privy embedded wallet; fall back to any connected Solana wallet. */
@@ -115,7 +141,13 @@ function PrivyBridge({ children }: { children: ReactNode }) {
       const { signature } = await signMessage({ message: msg, wallet, options: { uiOptions: walletUi(embedded) } });
       return signature;
     },
-  }), [ready, authenticated, displayName, address, embedded, wallet, login, logout, signTransaction, signMessage]);
+    email: {
+      sendCode: async (a) => { await sendCode({ email: a }); rememberEmail(a); },
+      submitCode: async (code) => { await loginWithCode({ code }); },
+      status: otp.status,
+      remembered: readEmail(),
+    },
+  }), [ready, authenticated, displayName, address, embedded, wallet, login, logout, signTransaction, signMessage, sendCode, loginWithCode, otp.status]);
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
