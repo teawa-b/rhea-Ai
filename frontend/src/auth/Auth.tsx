@@ -7,6 +7,7 @@
  * through Privy's signTransaction / signMessage.
  */
 import { PrivyProvider, usePrivy, useLogin, useLogout } from "@privy-io/react-auth";
+import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { toSolanaWalletConnectors, useSignMessage, useSignTransaction, useWallets, type ConnectedStandardSolanaWallet } from "@privy-io/react-auth/solana";
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useMarket } from "@/state/market";
@@ -39,6 +40,23 @@ const AuthCtx = createContext<RheaAuth>(GUEST);
 export const useAuth = () => useContext(AuthCtx);
 
 const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID as string | undefined;
+
+/* Privy's own wallet UI (the confirm-and-send screen behind showWalletUIs) resolves an
+ * @solana/kit client per chain and throws "No RPC configuration found for chain
+ * solana:mainnet" while rendering if we don't hand it one — which took the whole React
+ * tree down the moment Buy opened the modal. The backend's SOLANA_RPC_URL never reaches
+ * the browser, so the client needs its own VITE_SOLANA_RPC_URL; the public endpoint is a
+ * rate-limited last resort that keeps the modal alive rather than blank. */
+const RPC_HTTP = (import.meta.env.VITE_SOLANA_RPC_URL as string | undefined)?.trim() || "https://api.mainnet-beta.solana.com";
+const RPC_WS = (import.meta.env.VITE_SOLANA_WS_URL as string | undefined)?.trim() || RPC_HTTP.replace(/^http/, "ws");
+
+const SOLANA_RPCS = {
+  "solana:mainnet": {
+    rpc: createSolanaRpc(RPC_HTTP),
+    rpcSubscriptions: createSolanaRpcSubscriptions(RPC_WS),
+    blockExplorerUrl: "https://explorer.solana.com",
+  },
+} as const;
 
 function PrivyBridge({ children }: { children: ReactNode }) {
   const { ready, authenticated, user } = usePrivy();
@@ -108,6 +126,7 @@ export function RheaAuthProvider({ children }: { children: ReactNode }) {
           showWalletUIs: true,
         },
         externalWallets: { solana: { connectors: toSolanaWalletConnectors() } },
+        solana: { rpcs: SOLANA_RPCS },
       }}
     >
       <PrivyBridge>{children}</PrivyBridge>
