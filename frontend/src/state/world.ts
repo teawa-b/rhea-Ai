@@ -95,6 +95,11 @@ type WorldState = {
   focusChartTimestamp: (ts: number | null) => void;
   addChartEvent: (ev: Omit<ChartEvent, "id">) => ChartEvent;
   showNews: (target: string, items: NewsEvent[]) => void;
+  /** Take down the research trail (news + impact) with the panel it was raised
+   *  for. `keepFor` spares news that is really about that country — closing a
+   *  company panel drops back to its country, and the country briefing that led
+   *  there should survive. */
+  clearResearch: (keepFor?: CountryCode | null) => void;
   showImpact: (impact: ImpactAnalysis | null) => void;
   compareCompanies: (qs: string[]) => string[];
   showStreetView: (companyId: string | null) => void;
@@ -251,7 +256,9 @@ export const useWorld = create<WorldState>((set, get) => ({
       dbcStudio: null,
       panelReady: true,
       panelOpen: false,
-      ...(clear ? { highlightedCountries: [], highlightedCompanies: [], connections: [], countryHeat: {}, news: null, impact: null, chartEvents: [] } : {}),
+      news: null,
+      impact: null,
+      ...(clear ? { highlightedCountries: [], highlightedCompanies: [], connections: [], countryHeat: {}, chartEvents: [] } : {}),
       contextVersion: s.contextVersion + 1,
     }));
   },
@@ -309,6 +316,11 @@ export const useWorld = create<WorldState>((set, get) => ({
     return full;
   },
   showNews: (target, items) => set((s) => ({ news: { target, items }, contextVersion: s.contextVersion + 1 })),
+  clearResearch: (keepFor) => set((s) => {
+    const aboutPlace = Boolean(keepFor && s.news
+      && (s.news.target === COUNTRIES[keepFor].name || s.news.items.some((n) => n.countryCodes.includes(keepFor))));
+    return { impact: null, ...(aboutPlace ? {} : { news: null }), contextVersion: s.contextVersion + 1 };
+  }),
   showImpact: (impact) => set({ impact }),
   compareCompanies: (qs) => {
     const ids = [...new Set(qs.map((q) => resolveCompany(q)?.id).filter(Boolean) as string[])].slice(0, 4);

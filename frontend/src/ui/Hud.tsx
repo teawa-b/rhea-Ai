@@ -149,6 +149,7 @@ export function Hud() {
   const resetGlobe = useWorld((s) => s.resetGlobe);
   const focusCompany = useWorld((s) => s.focusCompany);
   const focusCountry = useWorld((s) => s.focusCountry);
+  const clearResearch = useWorld((s) => s.clearResearch);
   const panelReady = useWorld((s) => s.panelReady);
   const panelOpen = useWorld((s) => s.panelOpen);
   const setPanelOpen = useWorld((s) => s.setPanelOpen);
@@ -240,7 +241,7 @@ export function Hud() {
   const preIpoCount = overview?.assets.filter((a) => a.issuerKey === "prestocks").length ?? 0;
 
   const showPanel = pendingTrade || pendingOrder || gatePanel || placePanel || comparison || showPortfolio || privateMarkets || dbcStudio != null || (news && !focusedCompany && !focusedCountry && !focusedRegion) || Object.keys(countryHeat).length > 0;
-  const goBack = () => { if (focusedCompany && focusedCountry) focusCountry(focusedCountry, "user"); else resetGlobe(false); };
+  const goBack = () => { if (focusedCompany && focusedCountry) { clearResearch(focusedCountry); focusCountry(focusedCountry, "user"); } else resetGlobe(false); };
   /* Trades, orders and the sign-in / deposit gates are things the user must act
    * on, so they always open. Everything else is browsing: on a phone it waits
    * behind a peek bar unless the user asked for it by tapping. */

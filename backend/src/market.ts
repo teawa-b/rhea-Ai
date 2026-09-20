@@ -192,6 +192,10 @@ export function checkEligibility(asset: TokenizedAsset | undefined, action: "buy
 
 /* ---------------- Portfolio ---------------- */
 
+/** Below either of these a balance is dust left over from a sale, not a position. */
+const DUST_UI = 1e-6;
+const DUST_USD = 0.01;
+
 export async function readPortfolio(wallet: string): Promise<Portfolio> {
   const owner = new PublicKey(wallet);
   const assets = await listTokenizedAssets();
@@ -218,7 +222,13 @@ export async function readPortfolio(wallet: string): Promise<Portfolio> {
     const a = byMint.get(h.mint)!;
     const p = prices[h.mint]?.usdPrice ?? null;
     return { companyId: a.companyId, mint: h.mint, symbol: a.symbol, amountUi: h.amountUi, tokenPriceUsd: p, valueUsd: p == null ? null : p * h.amountUi };
-  }).sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0));
+  })
+    /* A sold-out position can leave a few base units behind (swaps floor to
+     * whole units), and that speck is not a holding: it would otherwise keep
+     * the stock in this list, in the briefing and standing on the holdings
+     * planet. An unpriced token is kept — we can't judge what it is worth. */
+    .filter((p) => p.amountUi >= DUST_UI && (p.valueUsd == null || p.valueUsd >= DUST_USD))
+    .sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0));
 
   return {
     wallet,

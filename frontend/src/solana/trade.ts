@@ -63,6 +63,14 @@ export async function prepareTrade(auth: RheaAuth, companyQuery: string, side: T
   if (!co) return { ok: false, error: `Unknown company "${companyQuery}"` };
   const m = useMarket.getState();
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Amount must be positive." };
+  /* "Sell it all" is asked for in round numbers — the panel's own button, or a
+   * figure the model read off a rounded balance — and the swap floors to whole
+   * base units. Anything within half a percent of the position is snapped back
+   * to the exact chain balance, so the sale doesn't leave a speck of dust
+   * behind that still counts as a holding (and still builds a shop on the
+   * holdings planet). */
+  const held = side === "sell" ? m.portfolio?.positions.find((p) => p.companyId === co.id)?.amountUi : undefined;
+  if (held != null && amount >= held * 0.995) amount = held;
   const resume: PendingIntent = { kind: side, companyId: co.id, amount };
   const gate = refuseDemo(resume) ?? requireSignIn(auth, side === "buy" ? `Sign in to buy $${amount} of ${co.name}` : `Sign in to sell ${co.name}`, resume);
   if (gate) return gate;

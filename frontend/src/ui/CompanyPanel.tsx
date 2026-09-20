@@ -60,6 +60,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
   const streetView = useWorld((s) => s.streetViewCompany);
   const showStreetView = useWorld((s) => s.showStreetView);
   const focusCountry = useWorld((s) => s.focusCountry);
+  const clearResearch = useWorld((s) => s.clearResearch);
 
   const [amount, setAmount] = useState(100);
   const [trigger, setTrigger] = useState<{ price: string; amount: string }>({ price: "", amount: "100" });
@@ -167,7 +168,7 @@ export function CompanyPanel({ companyId }: { companyId: string }) {
           <div className="sub">{co.ticker} · {co.sector}</div>
           </div>
         </div>
-        <button className="icon-btn" onClick={() => focusCountry(co.countryCode, "user")} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
+        <button className="icon-btn" onClick={() => { clearResearch(co.countryCode); focusCountry(co.countryCode, "user"); }} title={`Close · back to ${COUNTRIES[co.countryCode].name}`} aria-label={`Close, back to ${COUNTRIES[co.countryCode].name}`}><CloseIcon size={16} /></button>
       </div>
       <div className="panel-body scroll">
         {/* Prices.
