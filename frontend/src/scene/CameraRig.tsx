@@ -93,6 +93,37 @@ const _camB = new THREE.Vector3();
 const _lookA = new THREE.Vector3();
 const _lookB = new THREE.Vector3();
 const _look = new THREE.Vector3();
+
+/* ---------------- On a shop's doorstep ----------------
+ * Clicking a building on the holdings planet walks the camera up to it. The
+ * shop already keeps its sign turned toward the viewer, so arriving in front
+ * of the premises is arriving in front of the logo, and the stock's numbers
+ * stand on a board beside it. The shop writes its own live pose in here every
+ * frame; the rig flies to that, and the board hangs off it. */
+export const inspect = {
+  /** the shop the camera is framed on; null when the town is seen whole */
+  aimed: null as string | null,
+  t: 0, k: 0,
+  /** its plot and the way "up" points on it */
+  pos: new THREE.Vector3(),
+  up: new THREE.Vector3(0, 1, 0),
+  /** the way the camera came in, fixed on arrival so the walk-in is a straight line */
+  dir: new THREE.Vector3(0, 0, 1),
+  /** how tall the premises are, so the framing holds whatever the position is worth */
+  height: 0.3,
+  /* The shop the user has picked, written by its own building every frame
+   * (id null once nothing is picked). The rig only adopts it once it has
+   * walked back out of whichever shop it was in, so choosing a second shop
+   * leaves the first and crosses the town instead of cutting straight there. */
+  next: { id: null as string | null, pos: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), dir: new THREE.Vector3(0, 0, 1), height: 0.3 },
+};
+const INSPECT_S = 1.3;
+/** How far right of the shop its stats board stands, in planet radii. */
+export const BOARD_DX = 0.44;
+const _camC = new THREE.Vector3();
+const _lookC = new THREE.Vector3();
+const _right = new THREE.Vector3();
+
 const headAnchor = { frames: 0, locked: false };
 
 /** Re-seat the headset layout in front of the user's current head pose. */
@@ -204,6 +235,21 @@ export function CameraRig({ children }: { children: ReactNode }) {
     travel.t = clamp(travel.t + (toVault ? 1 : -1) * Math.min(0.1, rawDt) / TRAVEL_S, 0, 1);
     travel.k = easeInOut(travel.t);
 
+    /* Walking up to one shop, and back out again when it is let go. */
+    const next = inspect.next;
+    if (inspect.aimed == null && next.id != null) {
+      inspect.aimed = next.id;
+      inspect.dir.copy(next.dir);
+    }
+    if (inspect.aimed != null && inspect.aimed === next.id) {
+      /* The town still breathes on the way in: keep the plot's live pose. */
+      inspect.pos.copy(next.pos); inspect.up.copy(next.up); inspect.height = next.height;
+    }
+    const onShop = inspect.aimed != null && inspect.aimed === next.id;
+    inspect.t = clamp(inspect.t + (onShop ? 1 : -1) * Math.min(0.1, rawDt) / INSPECT_S, 0, 1);
+    inspect.k = easeInOut(inspect.t);
+    if (inspect.t <= 0) inspect.aimed = null;
+
     g.rotation.set(0, 0, 0);
     g.rotateOnWorldAxis(Y_AXIS, rig.yaw);
     g.rotateOnWorldAxis(X_AXIS, rig.pitch);
@@ -284,6 +330,10 @@ export function CameraRig({ children }: { children: ReactNode }) {
       /* Panel offset shrinks on narrow viewports where the panel overlays instead. */
       const wide = Math.min(1, Math.max(0, (aspect - 0.9) / 0.6));
       const ox = -rig.offsetX * (d / DIST.world) * wide;
+      /* Standing on a plot, "up" is that plot's own normal, not the world's:
+       * without this the shop and its board lean with the planet. */
+      camera.up.set(0, 1, 0);
+      if (inspect.k > 0) camera.up.lerp(inspect.up, inspect.k).normalize();
       if (travel.k <= 0) {
         camera.position.set(ox, 0, d);
         camera.lookAt(ox, 0, 0);
@@ -293,6 +343,17 @@ export function CameraRig({ children }: { children: ReactNode }) {
         const side = 1.15 * wide;
         _lookB.copy(PLANET_POS).add(_look.set(side, 0.3, 0));
         _camB.copy(_lookB).add(_look.set(0, 1.1, 6.6 * fit));
+        /* On a shop's doorstep: its sign dead ahead, its numbers beside it,
+         * the pair framed in the space the portfolio panel leaves free. */
+        if (inspect.k > 0) {
+          _right.crossVectors(inspect.up, inspect.dir).normalize();
+          _lookC.copy(inspect.pos)
+            .addScaledVector(inspect.up, inspect.height * 0.45 + 0.08)
+            .addScaledVector(_right, BOARD_DX / 2 + 0.37 * wide);
+          _camC.copy(_lookC).addScaledVector(inspect.dir, (1.35 + inspect.height * 1.2) * fit).addScaledVector(inspect.up, 0.08);
+          _camB.lerp(_camC, inspect.k);
+          _lookB.lerp(_lookC, inspect.k);
+        }
         const k = travel.k;
         camera.position.lerpVectors(_camA, _camB, k);
         camera.position.y += Math.sin(Math.PI * k) * 1.8;

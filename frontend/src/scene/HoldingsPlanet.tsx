@@ -11,16 +11,19 @@ import { useXR } from "@react-three/xr";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { COMPANY_BY_ID } from "@shared/registry";
+import type { ChartRange } from "@shared/types";
 import { logoUrl } from "@/market/logos";
-import { C, fmtUsd } from "@/theme";
+import { C, fmtPct, fmtUsd } from "@/theme";
 import { useMarket } from "@/state/market";
 import { useWorld } from "@/state/world";
-import { FONT_BOLD } from "./fonts";
+import { FONT_BODY, FONT_BOLD, FONT_NUM } from "./fonts";
 import { HoloLabel } from "./HoloLabel";
-import { PLANET_POS, XR_PLANET_POS, XR_PLANET_SCALE, travel } from "./CameraRig";
+import { BOARD_DX, PLANET_POS, XR_PLANET_POS, XR_PLANET_SCALE, inspect, travel } from "./CameraRig";
+import { GlassRect } from "./glass";
 import { clamp, damp, nearestAngle } from "./geo";
 import { useLogoTexture } from "./logoTexture";
 import { feel } from "./xrFeedback";
+import { drawChart } from "@/ui/chartDraw";
 
 /** An orbiting balance (cash-like: USDC, SOL). */
 type Ball = { id: string; title: string; subtitle: string; color: string; size: number };
@@ -221,8 +224,7 @@ const _q = new THREE.Quaternion();
  * `rise` is the delay in seconds before it is built (null = already standing);
  * building only starts once the planet is on screen, so a buy made back at
  * Earth is still shown going up on arrival. */
-function Storefront({ b, rise, inXR, onBuilt }: { b: Shop; rise: number | null; inXR: boolean; onBuilt: (id: string) => void }) {
-  const focusCompany = useWorld((s) => s.focusCompany);
+function Storefront({ b, rise, inXR, selected, onSelect, onBuilt }: { b: Shop; rise: number | null; inXR: boolean; selected: boolean; onSelect: (id: string) => void; onBuilt: (id: string) => void }) {
   const camera = useThree((s) => s.camera);
   const [walls, glow] = useFloors(b.floors);
   const logo = useLogoTexture(b.icon);
@@ -241,7 +243,7 @@ function Storefront({ b, rise, inXR, onBuilt }: { b: Shop; rise: number | null; 
   const facing = useRef(0);
   const yaw = useRef(0);
 
-  const open = useCallback(() => focusCompany(b.companyId, "user"), [focusCompany, b.companyId]);
+  const open = useCallback(() => onSelect(b.id), [onSelect, b.id]);
 
   const w = b.width;
   const d = b.depth;
@@ -271,6 +273,20 @@ function Storefront({ b, rise, inXR, onBuilt }: { b: Shop; rise: number | null; 
     const front = _n.dot(_v);
     g.getWorldQuaternion(_q).invert();
 
+    /* Being looked at: hand the rig this plot's live pose so the camera can
+     * stand in front of it, and fix the approach on the first frame so the
+     * walk-in is a straight line from where the viewer already was. */
+    if (selected) {
+      const n = inspect.next;
+      n.id = b.id;
+      n.pos.copy(_p);
+      n.up.copy(_n);
+      n.height = h;
+      /* The way in, fixed while the rig is still out with the whole town:
+       * the walk-in is then a straight line from where the viewer was. */
+      if (inspect.aimed !== b.id) n.dir.copy(_v);
+    }
+
     /* Turn the premises on their plot so the sign faces the viewer. */
     _v.applyQuaternion(_q);
     yaw.current = damp(yaw.current, nearestAngle(Math.atan2(_v.x, _v.z), yaw.current), 3, dt);
@@ -279,7 +295,7 @@ function Storefront({ b, rise, inXR, onBuilt }: { b: Shop; rise: number | null; 
     /* A chip only where the planet is turned toward the viewer — near the limb
      * a whole district projects into the same few pixels — faded in by scale,
      * which needs no per-frame React state. */
-    const want = b.label ? clamp((front - 0.3) / 0.25, 0, 1) * ease : 0;
+    const want = b.label ? clamp((front - 0.3) / 0.25, 0, 1) * ease * (1 - inspect.k) : 0;
     facing.current = damp(facing.current, want, 6, dt);
     if (chip.current) {
       const show = facing.current > 0.02;
@@ -376,6 +392,177 @@ function Storefront({ b, rise, inXR, onBuilt }: { b: Shop; rise: number | null; 
   );
 }
 
+/* ---------------- The board beside the shop ----------------
+ * What the position is actually worth, standing on the pavement next to the
+ * premises: the numbers the portfolio panel lists, at the size of the
+ * building itself. Authored in planet radii and rescaled to a fixed size in
+ * the room, so it reads the same on a desktop flight and in a headset. */
+const BOARD_W = 0.6;
+const BOARD_H = 0.58;
+/** Board width in the room: planet radii on the desktop flight, metres in XR. */
+const BOARD_WORLD = { flat: 1, xr: 0.72 };
+const BOARD_RANGE: ChartRange = "1M";
+
+const _r = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _qc = new THREE.Quaternion();
+const _qp = new THREE.Quaternion();
+const _loc = new THREE.Vector3();
+const _dst = new THREE.Vector3();
+
+/** A board control: the app's corner cut, its label, and a press. */
+function BoardButton({ x, w, label, accent, onClick }: { x: number; w: number; label: string; accent: string; onClick: () => void }) {
+  return (
+    <group position={[x, 0, 0]} onClick={(e) => { e.stopPropagation(); feel.press(e); onClick(); }} onPointerOver={(e) => feel.hover(e)}>
+      <GlassRect w={w} h={0.062} chamfer={0.016} top={C.panel} accent={accent} interactive fill={0.8} rim={0.9} stroke={0.003} glow={0} sheen={0} bar={0} topBar={0} />
+      <Text font={FONT_BODY} position={[0, 0, 0.002]} fontSize={0.026} color={accent} anchorX="center" anchorY="middle" letterSpacing={0.1}>{label}</Text>
+    </group>
+  );
+}
+
+/** The stock's own chart on the board, drawn into a canvas like the headset's. */
+function BoardChart({ companyId, w, h }: { companyId: string; w: number; h: number }) {
+  const co = COMPANY_BY_ID[companyId];
+  const canvas = useMemo(() => { const c = document.createElement("canvas"); c.width = 900; c.height = 360; return c; }, []);
+  const texture = useMemo(() => { const t = new THREE.CanvasTexture(canvas); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; }, [canvas]);
+  const loadHistory = useMarket((s) => s.loadHistory);
+  const last = useRef({ t: 0, key: "" });
+  useEffect(() => { void loadHistory(companyId, BOARD_RANGE); }, [companyId, loadHistory]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  useFrame((s) => {
+    if (s.clock.elapsedTime - last.current.t < 0.5) return;
+    last.current.t = s.clock.elapsedTime;
+    const m = useMarket.getState();
+    const hist = m.histories[`${companyId}:${BOARD_RANGE}`];
+    const d = m.details[companyId];
+    const end = hist?.candles[hist.candles.length - 1];
+    const key = [hist?.source, hist?.candles.length, end?.t, end?.c, d?.price.tokenPriceUsd].join(";");
+    if (key === last.current.key) return;
+    last.current.key = key;
+    drawChart(canvas.getContext("2d")!, {
+      candles: hist?.candles ?? [], range: BOARD_RANGE, mode: "line",
+      currentPrice: d?.price.underlyingPriceUsd ?? d?.price.tokenPriceUsd ?? null,
+      marketOpen: d?.price.marketSession === "regular",
+      events: [], focusTs: null, width: 450, height: 180, dpr: 2, ticker: co?.ticker ?? "", ar: true,
+      source: hist ? (hist.source === "pyth" ? "Pyth" : "Nasdaq · Yahoo") : "—",
+    });
+    texture.needsUpdate = true;
+  });
+  return (
+    <mesh>
+      <planeGeometry args={[w, h]} />
+      <meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} />
+    </mesh>
+  );
+}
+
+function BoardRow({ y, label, value, color = C.white }: { y: number; label: string; value: string; color?: string }) {
+  return (
+    <>
+      <Text font={FONT_BODY} position={[-BOARD_W / 2 + 0.03, y, 0.002]} fontSize={0.023} color="#8ea3bd" anchorX="left" anchorY="middle" letterSpacing={0.09}>{label}</Text>
+      <Text font={FONT_NUM} position={[BOARD_W / 2 - 0.03, y, 0.002]} fontSize={0.025} color={color} anchorX="right" anchorY="middle">{value}</Text>
+    </>
+  );
+}
+
+function ShopBoard({ shop, inXR, onClose }: { shop: Shop; inXR: boolean; onClose: () => void }) {
+  const co = COMPANY_BY_ID[shop.companyId];
+  const camera = useThree((s) => s.camera);
+  const detail = useMarket((s) => s.details[shop.companyId]);
+  const lite = useMarket((s) => s.prices[shop.companyId]);
+  const portfolio = useMarket((s) => s.portfolio);
+  const loadDetail = useMarket((s) => s.loadDetail);
+  const focusCompany = useWorld((s) => s.focusCompany);
+  const logo = useLogoTexture(shop.icon);
+  const g = useRef<THREE.Group>(null);
+
+  /* Only ever one board is up, so polling the one stock on it is cheap. */
+  useEffect(() => {
+    void loadDetail(shop.companyId, true);
+    const h = setInterval(() => void loadDetail(shop.companyId, true), 15_000);
+    return () => clearInterval(h);
+  }, [shop.companyId, loadDetail]);
+
+  const pos = portfolio?.positions.find((p) => p.mint === shop.id);
+  const price = detail?.price.tokenPriceUsd ?? lite?.tokenPriceUsd ?? pos?.tokenPriceUsd ?? null;
+  const ch = detail?.price.change24hPct ?? lite?.change24hPct ?? null;
+  const share = portfolio && portfolio.totalValueUsd > 0 && pos?.valueUsd != null ? (pos.valueUsd / portfolio.totalValueUsd) * 100 : null;
+  const chColor = ch == null ? "#b8c7da" : ch >= 0 ? C.solGreen : C.magenta;
+
+  useFrame(() => {
+    const b = g.current;
+    const parent = b?.parent;
+    if (!b || !parent) return;
+    /* Up only once the walk-in is well under way: a board the size of the town
+     * would otherwise hang over it from clear across the system. */
+    const k = clamp((inspect.k - 0.2) / 0.6, 0, 1);
+    b.visible = k > 0.001 && inspect.aimed === shop.id;
+    if (!b.visible) return;
+    _r.crossVectors(inspect.up, inspect.dir).normalize();
+    /* Beside the shop, a step out toward the viewer: the next street over is
+     * still standing there, and the numbers can't be read through a roof. */
+    _b.copy(inspect.pos)
+      .addScaledVector(inspect.up, inspect.height * 0.62 + 0.09)
+      .addScaledVector(_r, BOARD_DX)
+      .addScaledVector(inspect.dir, 0.2);
+    parent.worldToLocal(_b);
+    b.position.copy(_b);
+    /* Square to the view rather than turned toward the eye, so the board is
+     * read flat-on; the camera's own up is the plot's, so it stands upright. */
+    camera.getWorldQuaternion(_qc);
+    parent.getWorldQuaternion(_qp);
+    b.quaternion.copy(_qp.invert().multiply(_qc));
+    const world = parent.getWorldScale(_v).x || 1;
+    b.scale.setScalar(((inXR ? BOARD_WORLD.xr : BOARD_WORLD.flat) / world) * (0.84 + 0.16 * k));
+  });
+
+  return (
+    <group ref={g} visible={false}>
+      <GlassRect position={[0, 0, -0.004]} w={BOARD_W} h={BOARD_H} r={0.026} top={C.panel} bottom={C.oceanDeep} accent={shop.accent}
+        interactive fill={0.88} rim={0.9} stroke={0.003} topBar={1} glow={0} sheen={0} bar={0} />
+      {/* Who this is: the mark that is over the door, and what it trades at. */}
+      {logo ? (
+        <group position={[-BOARD_W / 2 + 0.072, BOARD_H / 2 - 0.075, 0.002]}>
+          <mesh position={[0, 0, -0.001]}>
+            <planeGeometry args={[0.088, 0.088]} />
+            <meshBasicMaterial color="#ffffff" toneMapped={false} />
+          </mesh>
+          <mesh>
+            <planeGeometry args={[0.072, 0.072]} />
+            <meshBasicMaterial map={logo} transparent toneMapped={false} />
+          </mesh>
+        </group>
+      ) : null}
+      <Text font={FONT_BOLD} position={[-BOARD_W / 2 + (logo ? 0.132 : 0.03), BOARD_H / 2 - 0.058, 0.002]} fontSize={0.046} color={C.white} anchorX="left" anchorY="middle" letterSpacing={0.03}>
+        {shop.title}
+      </Text>
+      <Text font={FONT_BODY} position={[-BOARD_W / 2 + (logo ? 0.132 : 0.03), BOARD_H / 2 - 0.108, 0.002]} fontSize={0.024} color="#8ea3bd" anchorX="left" anchorY="middle" maxWidth={0.3}>
+        {co?.name ?? shop.companyId}
+      </Text>
+      <Text font={FONT_NUM} position={[BOARD_W / 2 - 0.03, BOARD_H / 2 - 0.058, 0.002]} fontSize={0.042} color={C.white} anchorX="right" anchorY="middle">
+        {fmtUsd(price)}
+      </Text>
+      <Text font={FONT_NUM} position={[BOARD_W / 2 - 0.03, BOARD_H / 2 - 0.108, 0.002]} fontSize={0.026} color={chColor} anchorX="right" anchorY="middle">
+        {`${fmtPct(ch)} 24h`}
+      </Text>
+      {/* The stock itself, then what the user holds of it. */}
+      <group position={[0, 0.045, 0.002]}><BoardChart companyId={shop.companyId} w={BOARD_W - 0.06} h={0.22} /></group>
+      <mesh position={[0, -0.09, 0.002]}>
+        <planeGeometry args={[BOARD_W - 0.06, 0.0025]} />
+        <meshBasicMaterial color={shop.accent} transparent opacity={0.4} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <BoardRow y={-0.135} label="POSITION" value={pos ? `${pos.amountUi.toFixed(pos.amountUi < 1 ? 4 : 2)} ${pos.symbol}` : "—"} />
+      <BoardRow y={-0.185} label="VALUE" value={fmtUsd(pos?.valueUsd)} color={C.solGreen} />
+      <BoardRow y={-0.235} label="SHARE" value={share == null ? "—" : `${share.toFixed(1)}% of holdings`} />
+      {/* Back out to the town, or on to the full company view over on Earth. */}
+      <group position={[0, -BOARD_H / 2 - 0.055, 0.002]}>
+        <BoardButton x={-0.16} w={0.28} label="FULL VIEW" accent={C.cyan} onClick={() => focusCompany(shop.companyId, "user")} />
+        <BoardButton x={0.16} w={0.28} label="BACK TO TOWN" accent={C.frost} onClick={onClose} />
+      </group>
+    </group>
+  );
+}
+
 export function HoldingsPlanet() {
   const inXR = useXR((s) => s.mode) != null;
   const portfolio = useMarket((s) => s.portfolio);
@@ -384,9 +571,36 @@ export function HoldingsPlanet() {
   const root = useRef<THREE.Group>(null);
   const spin = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
+  /* The cash balances and the headline: out of the way on a shop's doorstep. */
+  const orbits = useRef<THREE.Group>(null);
+  const headline = useRef<THREE.Group>(null);
 
   /* Refresh balances whenever the user comes here. */
   useEffect(() => { if (vault) void useMarket.getState().loadPortfolio(); }, [vault]);
+
+  /* The shop being looked at (its mint), and the shop whose board is still on
+   * screen — the board outlives the selection by the length of the walk back
+   * out, so it doesn't vanish the instant the camera turns around. */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [boardId, setBoardId] = useState<string | null>(null);
+  const selRef = useRef<string | null>(null);
+  const boardRef = useRef<string | null>(null);
+  selRef.current = selected;
+  boardRef.current = boardId;
+  const select = useCallback((id: string) => setSelected((cur) => (cur === id ? null : id)), []);
+  const close = useCallback(() => setSelected(null), []);
+  useEffect(() => { if (selected) setBoardId(selected); else inspect.next.id = null; }, [selected]);
+  useEffect(() => () => { inspect.next.id = null; }, []);
+  /* Leaving the planet, changing wallet, or selling the position out from
+   * under the premises all leave the shop. */
+  useEffect(() => { if (!vault) setSelected(null); }, [vault]);
+  useEffect(() => { setSelected(null); }, [portfolio?.wallet]);
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected]);
 
   const balls = useMemo<Ball[]>(() => {
     if (!portfolio) return [];
@@ -441,6 +655,10 @@ export function HoldingsPlanet() {
   /* Which shops still have to be built, and how long each waits first: the whole
    * town goes up (staggered) the first time the user sees it, and a stock
    * bought later is built on its own. */
+  /* A position sold away takes its premises with it; don't keep the camera
+   * parked on a plot that no longer has anything standing on it. */
+  useEffect(() => { if (selected && !shops.some((b) => b.id === selected)) setSelected(null); }, [shops, selected]);
+
   const [rising, setRising] = useState<Map<string, number>>(() => new Map());
   const known = useRef<Set<string> | null>(null);
   /* A different wallet is a different town: forget what was already standing. */
@@ -476,17 +694,37 @@ export function HoldingsPlanet() {
       g.position.copy(XR_PLANET_POS);
       /* grows in with a slight overshoot */
       const pop = k < 1 ? k * (1 + 0.18 * Math.sin(Math.PI * k)) : 1;
-      g.scale.setScalar(XR_PLANET_SCALE * pop);
+      const scale = XR_PLANET_SCALE * pop * (1 + 1.6 * inspect.k);
+      g.scale.setScalar(scale);
+      /* A headset can't walk over to a shop, so the town grows and slides
+       * until that shop stands where the whole planet was floating, a little
+       * left of it to leave the board beside it its room. */
+      if (inspect.aimed != null && inspect.k > 0) {
+        _loc.copy(inspect.pos);
+        g.worldToLocal(_loc);                       // the plot, in planet space
+        _dst.copy(XR_PLANET_POS).addScaledVector(_loc, -scale);
+        _dst.x -= 0.18;
+        g.position.lerpVectors(XR_PLANET_POS, _dst, inspect.k);
+      }
     } else {
       g.position.copy(PLANET_POS);
       g.scale.setScalar(1);
     }
-    if (spin.current) spin.current.rotation.y = Math.sin(s.clock.elapsedTime * 0.07) * SWAY;
+    /* The town settles as the camera walks in: a swaying street would carry
+     * the shop the camera is tracking out from under it. */
+    if (spin.current) spin.current.rotation.y = Math.sin(s.clock.elapsedTime * 0.07) * SWAY * (1 - inspect.k);
+    /* The board comes down once the camera is back with the whole town. */
+    if (boardRef.current && !selRef.current && inspect.t <= 0) setBoardId(null);
     if (ringRef.current) ringRef.current.rotation.z = s.clock.elapsedTime * 0.02;
+    /* On a doorstep the orbits and the headline are someone else's view. */
+    const townWide = inspect.k < 0.3;
+    if (orbits.current) orbits.current.visible = townWide;
+    if (headline.current) headline.current.visible = townWide;
   });
 
+  const board = shops.find((b) => b.id === boardId) ?? null;
   const stocksUsd = portfolio?.positions.reduce((s, p) => s + (p.valueUsd ?? 0), 0) ?? 0;
-  const headline = !portfolio
+  const summary = !portfolio
     ? "Sign in to see your wallet"
     : portfolio.positions.length === 0
       ? `${fmtUsd(portfolio.totalValueUsd)} · no stocks yet — buy one to build here`
@@ -497,11 +735,11 @@ export function HoldingsPlanet() {
       <group rotation={[0.42, 0, -0.1]}>
         {/* the planet and everything built on it turn together */}
         <group ref={spin}>
-          <mesh>
+          <mesh onClick={(e) => { if (!selRef.current) return; e.stopPropagation(); close(); }}>
             <sphereGeometry args={[1, 64, 48]} />
             <meshStandardMaterial map={bands} emissiveMap={bands} emissive="#ffffff" emissiveIntensity={0.55} roughness={0.8} />
           </mesh>
-          {shops.map((b) => <Storefront key={b.id} b={b} rise={rising.get(b.id) ?? null} inXR={inXR} onBuilt={onBuilt} />)}
+          {shops.map((b) => <Storefront key={b.id} b={b} rise={rising.get(b.id) ?? null} inXR={inXR} selected={selected === b.id} onSelect={select} onBuilt={onBuilt} />)}
         </group>
         {/* atmosphere */}
         <mesh scale={1.08}>
@@ -513,9 +751,15 @@ export function HoldingsPlanet() {
           <ringGeometry args={[1.28, 1.52, 96]} />
           <meshBasicMaterial color={C.cyan} transparent opacity={0.16} side={THREE.DoubleSide} depthWrite={false} toneMapped={false} />
         </mesh>
-        {balls.map((b, i) => <OrbitingBall key={b.id} ball={b} index={i} radius={1.58 + i * 0.26} tilt={BALL_TILTS[i % BALL_TILTS.length]} />)}
+        <group ref={orbits}>
+          {balls.map((b, i) => <OrbitingBall key={b.id} ball={b} index={i} radius={1.58 + i * 0.26} tilt={BALL_TILTS[i % BALL_TILTS.length]} />)}
+        </group>
       </group>
-      <HoloLabel position={[0, 1.95, 0]} title="Your holdings" subtitle={headline} accent={C.solGreen} scale={1.35} />
+      {/* Outside the planet's own turn: the board keeps its own heading. */}
+      {board ? <ShopBoard shop={board} inXR={inXR} onClose={close} /> : null}
+      <group ref={headline}>
+        <HoloLabel position={[0, 1.95, 0]} title="Your holdings" subtitle={summary} accent={C.solGreen} scale={1.35} />
+      </group>
     </group>
   );
 }
