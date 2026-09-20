@@ -13,6 +13,7 @@ import { CompanyPanel } from "./CompanyPanel";
 import { DbcStudioPanel } from "./DbcStudioPanel";
 import { PrivateMarketsPanel } from "./PrivateMarketsPanel";
 import { CoLogo } from "./CoLogo";
+import { CopyAddress } from "./CopyAddress";
 import { CountryPanel } from "./CountryPanel";
 import { ArIcon, ChevronLeftIcon, GlobeIcon, MicIcon, MicOffIcon, RecenterIcon } from "./icons";
 import { NewsCards, ImpactCard } from "./NewsCards";
@@ -441,6 +442,7 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
   /* The store wallet, not auth.address: in ?demo=1 it is the read-only demo wallet. */
   const wallet = useMarket((s) => s.wallet);
   const demoMode = useMarket((s) => s.demoMode);
+  const setDepositPrompt = useMarket((s) => s.setDepositPrompt);
   useEffect(() => { void loadPortfolio(); }, [loadPortfolio]);
   const byCountry = new Map<string, number>();
   for (const p of portfolio?.positions ?? []) { const cc = COMPANY_BY_ID[p.companyId].countryCode; byCountry.set(cc, (byCountry.get(cc) ?? 0) + (p.valueUsd ?? 0)); }
@@ -448,7 +450,9 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
   return (
     <div className="panel clickable">
       <div className="panel-head">
-        <div><h2>{demoMode ? "Demo portfolio" : "Portfolio"}</h2><div className="sub">{wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-6)}` : ""} · Solana{demoMode ? " · read-only" : ""}</div></div>
+        <div style={{ minWidth: 0 }}><h2>{demoMode ? "Demo portfolio" : "Portfolio"}</h2>
+          <div className="sub">{wallet ? <CopyAddress address={wallet} label={demoMode ? "Public demo wallet" : "Your Solana wallet"} /> : null} · Solana{demoMode ? " · read-only" : ""}</div>
+        </div>
         <div className="row"><button className="btn ghost sm" onClick={() => { setCountryHeat(Object.fromEntries([...byCountry].map(([k, v]) => [k, v / total]))); useWorld.getState().resetGlobe(false); }}>Show on Earth</button><button className="btn ghost sm" onClick={onClose}>✕</button></div>
       </div>
       <div className="panel-body scroll">
@@ -457,6 +461,11 @@ function PortfolioPanel({ onClose }: { onClose: () => void }) {
           <dt>USDC</dt><dd>{fmtUsd(portfolio?.usdcBalance)}</dd>
           <dt>SOL</dt><dd>{portfolio?.solBalance.toFixed(4) ?? "—"}</dd>
         </dl>
+        {!demoMode && wallet ? (
+          <div className="row" style={{ marginTop: 10 }}>
+            <button className="btn ghost sm" onClick={() => setDepositPrompt({ neededUsd: 0, haveUsd: portfolio?.usdcBalance ?? 0 })} title="Show the wallet address to send USDC to">Deposit USDC</button>
+          </div>
+        ) : null}
         <div className="divider" />
         <div className="list">
           {(portfolio?.positions ?? []).map((p) => (

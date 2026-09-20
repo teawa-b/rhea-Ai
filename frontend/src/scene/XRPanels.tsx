@@ -524,19 +524,21 @@ function DepositHolo() {
   if (!prompt) return null;
   const have = portfolio?.usdcBalance ?? prompt.haveUsd;
   const addr = auth.address ?? "—";
+  /* Mirrors DepositPanel: no amount attached means "show me my address". */
+  const receiveOnly = prompt.neededUsd <= 0;
   return (
     <group>
       <Card w={0.84} h={0.56} accent={C.solGreen} />
-      <Label position={[-0.38, 0.22, 0.001]} text="FUND YOUR WALLET" size={0.04} color="#ffffff" />
-      <Label position={[-0.38, 0.175, 0.001]} text={`USDC on Solana · ${fmtUsd(Math.max(0, prompt.neededUsd - have))} more needed`} size={0.022} color="#b8c7da" />
+      <Label position={[-0.38, 0.22, 0.001]} text={receiveOnly ? "RECEIVE USDC" : "FUND YOUR WALLET"} size={0.04} color="#ffffff" />
+      <Label position={[-0.38, 0.175, 0.001]} text={receiveOnly ? "USDC on Solana" : `USDC on Solana · ${fmtUsd(Math.max(0, prompt.neededUsd - have))} more needed`} size={0.022} color="#b8c7da" />
       <Row y={0.11} label="Wallet USDC" value={fmtUsd(have)} />
-      <Row y={0.065} label="This trade needs" value={fmtUsd(prompt.neededUsd)} />
+      {receiveOnly ? null : <Row y={0.065} label="This trade needs" value={fmtUsd(prompt.neededUsd)} />}
       <Label position={[-0.38, 0.005, 0.001]} text="SEND USDC (SOLANA) TO" size={0.02} color="#b8c7da" />
       <Label position={[-0.38, -0.03, 0.001]} text={addr.slice(0, 22)} size={0.024} color={C.solGreen} />
       <Label position={[-0.38, -0.062, 0.001]} text={addr.slice(22)} size={0.024} color={C.solGreen} />
       <Label position={[-0.38, -0.115, 0.001]} text={`Solana network only; keep ~0.01 SOL for fees. Copy the address from the desktop panel.${prompt.resume ? " The trade continues when the USDC lands." : ""}`} size={0.021} color="#b8c7da" maxWidth={0.76} />
-      <Pill position={[-0.19, -0.2, 0.002]} w={0.24} label="Later" accent={C.frost} onClick={() => setPrompt(null)} />
-      <Pill position={[0.19, -0.2, 0.002]} w={0.24} label="I've sent it" accent={C.solGreen} onClick={() => void loadPortfolio()} />
+      <Pill position={[-0.19, -0.2, 0.002]} w={0.24} label={receiveOnly ? "Done" : "Later"} accent={C.frost} onClick={() => setPrompt(null)} />
+      <Pill position={[0.19, -0.2, 0.002]} w={0.24} label={receiveOnly ? "Refresh" : "I've sent it"} accent={C.solGreen} onClick={() => void loadPortfolio()} />
     </group>
   );
 }
